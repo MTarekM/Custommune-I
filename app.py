@@ -17,7 +17,7 @@ from tensorflow.keras.models import model_from_json
 from tensorflow.python.keras.layers.core import TFOpLambda
 
 # ─── Register internal ops and layers ─────────────────────────────────────────
-tf.keras.utils.get_custom_objects()['TFOpLambda'] = TFOpLambda
+#tf.keras.utils.get_custom_objects()['TFOpLambda'] = TFOpLambda
 tf.keras.utils.get_custom_objects()['tf.nn.silu'] = tf.nn.silu
 tf.keras.utils.get_custom_objects()['tf.__operators__.add'] = operator.add
 
@@ -119,10 +119,13 @@ def verify_versions():
 # ============== Load Model, Tokenizer, HLA DB ==============
 @st.cache_resource
 
+# ============== Load Model, Tokenizer, HLA DB ==============
+@st.cache_resource
 def load_model_and_data():
     verify_versions()
     verify_files()
 
+    # 1. Register all custom components globally first
     custom_objs = {
         'F1Score': F1Score,
         'NegativePredictiveValue': NegativePredictiveValue,
@@ -131,23 +134,33 @@ def load_model_and_data():
         'Swish': Swish,
         'MultiHeadAttention': MultiHeadAttention,
         'Attention': Attention,
-        'TFOpLambda': TFOpLambda,  # Explicitly include TFOpLambda
-        'tf.nn.silu': tf.nn.silu,  # Register silu activation
-        'tf.__operators__.add': operator.add  # Handle add operations
+        'TFOpLambda': TFOpLambda,  # Explicit registration
+        'tf.nn.silu': tf.nn.silu,
+        'tf.__operators__.add': operator.add
     }
+    
+    # Register with Keras' internal registry
+    for name, obj in custom_objs.items():
+        tf.keras.utils.get_custom_objects()[name] = obj
 
-    # Load model directly with custom objects
-    model = tf.keras.models.load_model(
-        'best_combined_model.h5',
-        custom_objects=custom_objs
-    )
+    # 2. Load model using the correct method
+    try:
+        model = tf.keras.models.load_model(
+            'best_combined_model.h5',
+            custom_objects=custom_objs,
+            compile=False  # Disable compilation if not needed
+        )
+    except ValueError as e:
+        st.error(f"Model loading failed: {str(e)}")
+        st.stop()
 
+    # Rest of your loading code...
     with open('tokenizer.pkl', 'rb') as f:
         tokenizer = pickle.load(f)
 
     hla_db = pd.read_csv('class1_pseudosequences.csv', header=None)
     pattern = r'^BoLA|^Mamu|^Patr|^SLA|^Chi|^DLA|^Eqca|^H-2|^Gogo|^H2'
-    hla_db = hla_db[~hla_db[0].str.contains(pattern, case=False, regex=True)]
+    hla_db = hla_db[~hla_db[0].str.contains(pattern, case=False, regex=True)
 
     return model, tokenizer, hla_db
 
