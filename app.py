@@ -121,6 +121,7 @@ def verify_versions():
 
 @st.cache_resource
 def load_model_with_custom_objects():
+    # Custom objects registration
     custom_objects = {
         'F1Score': F1Score,
         'NegativePredictiveValue': NegativePredictiveValue,
@@ -130,10 +131,15 @@ def load_model_with_custom_objects():
         'MultiHeadAttention': MultiHeadAttention,
         'Attention': Attention,
         'TFOpLambda': tf.keras.layers.Lambda,
-        'tf.nn.silu': Swish(),
-        'tf.__operators__.add': SafeAddLayer(),
         'keras': tf.keras,
+        # Replace operator reference with layer-based solution
+        'add': SafeAddLayer(),
+        # Add any custom lambda layer references
+        '<lambda>': SafeAddLayer()
     }
+
+    # Enable unsafe deserialization first
+    tf.keras.config.enable_unsafe_deserialization = True
     
     model = tf.keras.models.load_model(
         'best_combined_model.h5',
