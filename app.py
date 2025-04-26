@@ -18,8 +18,9 @@ from keras.engine.functional import Functional
 from tensorflow.python.keras.layers.core import TFOpLambda
 
 # ─── Register internal ops and layers ─────────────────────────────────────────
+# Ensure TFOpLambda and wrapped ops are known globally
 tf.keras.utils.get_custom_objects()['TFOpLambda'] = TFOpLambda
-tf.keras.utils.get_custom_objects()['tf.nn.silu'] = tf.nn.silu
+ tf.keras.utils.get_custom_objects()['tf.nn.silu'] = tf.nn.silu
 tf.keras.utils.get_custom_objects()['tf.__operators__.add'] = operator.add
 
 # ============== Unified Custom Components ==============
@@ -119,7 +120,8 @@ def verify_versions():
         print(f"✅ Versions OK: TF {curr['tensorflow']}, h5py {curr['h5py']}")
 
 # ============== Load Model, Tokenizer, HLA DB ==============
-\@st.cache_resource
+
+@st.cache_resource
 def load_model_and_data():
     verify_versions()
     verify_files()
