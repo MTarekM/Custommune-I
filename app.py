@@ -13,7 +13,8 @@ from tensorflow.keras import metrics
 from tensorflow.keras.layers import Layer, MultiHeadAttention, Attention
 from tensorflow.keras.utils import register_keras_serializable
 from tensorflow.keras.preprocessing.sequence import pad_sequences
-from tensorflow.keras.models import model_from_json, Functional
+from tensorflow.keras.models import model_from_json
+from tensorflow.keras.engine.functional import Functional
 from tensorflow.python.keras.layers.core import TFOpLambda
 
 # ─── Register internal ops and layers ─────────────────────────────────────────
@@ -159,7 +160,7 @@ def generate_kmers(seq, k=9):
 
 def predict_binding(epitope, allele, model, tokenizer, hla_db, threshold=0.5):
     try:
-        hla_seq = hla_db.loc[hla_db[0]==allele, 1].values[0]
+        hla_seq = hla_db.loc[hla_db[0] == allele, 1].values[0]
         combo = f"{epitope}-{hla_seq}"
         proc = preprocess_sequence(combo, tokenizer)
         prob = float(model.predict(proc, verbose=0)[0][0])
@@ -167,7 +168,7 @@ def predict_binding(epitope, allele, model, tokenizer, hla_db, threshold=0.5):
         if prob >= threshold:
             ic50 = IC50_MIN * (IC50_MAX/IC50_MIN)**((1-prob)/(1-threshold))
         else:
-            ic50 = IC50_MAX + (IC50_CUTOFF-IC50_MAX)*((threshold-prob)/threshold)
+            ic50 = IC50_MAX + (IC50_CUTOFF - IC50_MAX) * ((threshold - prob)/threshold)
         if ic50 < 50:
             aff = "High"
         elif ic50 < 500:
@@ -176,13 +177,27 @@ def predict_binding(epitope, allele, model, tokenizer, hla_db, threshold=0.5):
             aff = "Low"
         else:
             aff = "Non-Binder"
-        return dict(epitope=epitope, hla_allele=allele, pseudosequence=hla_seq,
-                    complex=combo, probability=prob, ic50=ic50,
-                    affinity=aff, prediction='Binder' if prob>=threshold else 'Non-Binder')
+        return {
+            'epitope': epitope,
+            'hla_allele': allele,
+            'pseudosequence': hla_seq,
+            'complex': combo,
+            'probability': prob,
+            'ic50': ic50,
+            'affinity': aff,
+            'prediction': 'Binder' if prob >= threshold else 'Non-Binder'
+        }
     except Exception as e:
-        return dict(epitope=epitope, hla_allele=allele, pseudosequence='N/A',
-                    complex='N/A', probability=0.0, ic50=0.0,
-                    affinity='Error', prediction=f'Error: {e}')
+        return {
+            'epitope': epitope,
+            'hla_allele': allele,
+            'pseudosequence': 'N/A',
+            'complex': 'N/A',
+            'probability': 0.0,
+            'ic50': 0.0,
+            'affinity': 'Error',
+            'prediction': f'Error: {str(e)}'
+        }
 
 
 def predict_wrapper(ep_input, alleles, k_length, model, tokenizer, hla_db):
@@ -191,23 +206,36 @@ def predict_wrapper(ep_input, alleles, k_length, model, tokenizer, hla_db):
     for raw in eps:
         kmers = generate_kmers(raw, k=k_length)
         if not kmers:
-            rows.append([raw, 'N/A'] + ['N/A']*5 + ['Error','Invalid (length<k)'])
+            rows.append([raw, 'N/A'] + ['N/A']*5 + ['Error', 'Invalid (length < k)'])
             continue
         for km in kmers:
             for al in alleles:
                 r = predict_binding(km, al, model, tokenizer, hla_db)
-                rows.append([raw, km, r['hla_allele'], r['pseudosequence'],
-                             r['complex'], f"{r['probability']:.4f}",
-                             f"{r['ic50']:.2f}", r['affinity'], r['prediction']])
-    return pd.DataFrame(rows, columns=[
-        'Input Sequence','Processed k-mer','HLA Allele','Pseudosequence',
-        'Complex','Probability','IC50 (nM)','Affinity','Prediction'
-    ])
+                rows.append([
+                    raw,
+                    km,
+                    r['hla_allele'],
+                    r['pseudosequence'],
+                    r['complex'],
+                    f"{r['probability']:.4f}",
+                    f"{r['ic50']:.2f}",
+                    r['affinity'],
+                    r['prediction']
+                ])
+    return pd.DataFrame(
+        rows,
+        columns=[
+            'Input Sequence', 'Processed k-mer', 'HLA Allele',
+            'Pseudosequence', 'Complex', 'Probability',
+            'IC50 (nM)', 'Affinity', 'Prediction'
+        ]
+    )
 
 # ============== Streamlit UI ==============
 def main():
     st.set_page_config(page_title="Custommune HLA-I Epitope Binding Prediction", layout="wide")
     st.title("🧬 Custommune HLA-I Epitope Binding Prediction")
+
     try:
         model, tokenizer, hla_db = load_model_and_data()
     except Exception as e:
@@ -219,20 +247,32 @@ def main():
 
     with st.sidebar:
         st.header("Input Parameters")
-        ep_input = st.text_area("Peptide Sequence(s)", help="Comma-separated epitopes, e.g. SIINFEKL, AGSIINFEKL")
-        k_length = st.number_input("k-mer Length", min_value=1, max_value=15, value=9, step=1)
-        alleles = st.multiselect("HLA Allele(s)", options=human_alleles, default=[default])
+        ep_input = st.text_area(
+            "Peptide Sequence(s)",
+            help="Comma-separated epitopes, e.g. SIINFEKL, AGSIINFEKL"
+        )
+        k_length = st.number_input(
+            "k-mer Length",
+            min_value=1, max_value=15, value=9, step=1
+        )
+        alleles = st.multiselect(
+            "HLA Allele(s)",
+            options=human_alleles,
+            default=[default]
+        )
         if st.button("Predict Binding"):
             if not ep_input.strip():
                 st.warning("Please enter at least one peptide sequence.")
             else:
-                df = predict_wrapper(ep_input, alleles, k_length, model, tokenizer, hla_db)
+                df = predict_wrapper(ep_input, alelles, k_length, model, tokenizer, hla_db)
                 st.subheader("Prediction Results")
                 st.dataframe(df, use_container_width=True, height=500)
 
-    st.markdown("""
+    # Hide Streamlit footer/menu
+    hide_style = """
         <style>#MainMenu{visibility:hidden;} footer{visibility:hidden;}</style>
-    """, unsafe_allow_html=True)
+    """
+    st.markdown(hide_style, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
