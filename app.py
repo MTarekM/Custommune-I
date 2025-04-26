@@ -13,7 +13,8 @@ from tensorflow.keras import metrics
 from tensorflow.keras.layers import Layer, MultiHeadAttention, Attention
 from tensorflow.keras.utils import register_keras_serializable
 from tensorflow.keras.preprocessing.sequence import pad_sequences
-from tensorflow.keras.models import model_from_json, Functional
+from tensorflow.keras.models import model_from_json
+from keras.engine.functional import Functional
 from tensorflow.python.keras.layers.core import TFOpLambda
 
 # ─── Register internal ops and layers ─────────────────────────────────────────
@@ -227,7 +228,7 @@ def main():
             if not ep_input.strip():
                 st.warning("Please enter at least one peptide sequence.")
             else:
-                df = predict_wrapper(ep_input, alleles, k_length, model, tokenizer, hla_db)
+                df = predict_wrapper(ep_input, alleles, k_length, model, tokenizer, hla_db)p
                 st.subheader("Prediction Results")
                 st.dataframe(df, use_container_width=True, height=500)
 
