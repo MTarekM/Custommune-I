@@ -100,11 +100,13 @@ class Swish(Layer):
         return tf.nn.silu(inputs)
 
 # ============== File & Version Verification ==============
+
 def verify_files():
     required = ['best_combined_model.h5', 'tokenizer.pkl', 'class1_pseudosequences.csv']
     missing = [f for f in required if not os.path.exists(f)]
     if missing:
         raise FileNotFoundError(f"Missing required files: {', '.join(missing)}")
+
 
 def verify_versions():
     req_min = {'tensorflow': '2.12.0', 'h5py': '3.7.0'}
@@ -117,7 +119,7 @@ def verify_versions():
         print(f"✅ Versions OK: TF {curr['tensorflow']}, h5py {curr['h5py']}")
 
 # ============== Load Model, Tokenizer, HLA DB ==============
-@st.cache_resource
+\@st.cache_resource
 def load_model_and_data():
     verify_versions()
     verify_files()
@@ -148,6 +150,7 @@ def load_model_and_data():
     return model, tokenizer, hla_db
 
 # ============== Preprocessing & Prediction ==============
+
 def preprocess_sequence(seq, tokenizer, max_length=50):
     enc = tokenizer.texts_to_sequences([seq])
     return pad_sequences(enc, maxlen=max_length, padding='post')
@@ -165,9 +168,9 @@ def predict_binding(epitope, allele, model, tokenizer, hla_db, threshold=0.5):
         prob = float(model.predict(proc, verbose=0)[0][0])
         IC50_MIN, IC50_MAX, IC50_CUTOFF = 0.1, 50000.0, 5000.0
         if prob >= threshold:
-            ic50 = IC50_MIN * (IC50_MAX/IC50_MIN)**((1-prob)/(1-threshold))
+            ic50 = IC50_MIN * (IC50_MAX / IC50_MIN) ** ((1 - prob) / (1 - threshold))
         else:
-            ic50 = IC50_MAX + (IC50_CUTOFF - IC50_MAX) * ((threshold - prob)/threshold)
+            ic50 = IC50_MAX + (IC50_CUTOFF - IC50_MAX) * ((threshold - prob) / threshold)
         if ic50 < 50:
             aff = "High"
         elif ic50 < 500:
@@ -176,13 +179,27 @@ def predict_binding(epitope, allele, model, tokenizer, hla_db, threshold=0.5):
             aff = "Low"
         else:
             aff = "Non-Binder"
-        return {'epitope': epitope, 'hla_allele': allele, 'pseudosequence': hla_seq,
-                'complex': combo, 'probability': prob, 'ic50': ic50,
-                'affinity': aff, 'prediction': 'Binder' if prob >= threshold else 'Non-Binder'}
+        return {
+            'epitope': epitope,
+            'hla_allele': allele,
+            'pseudosequence': hla_seq,
+            'complex': combo,
+            'probability': prob,
+            'ic50': ic50,
+            'affinity': aff,
+            'prediction': 'Binder' if prob >= threshold else 'Non-Binder'
+        }
     except Exception as e:
-        return {'epitope': epitope, 'hla_allele': allele, 'pseudosequence': 'N/A',
-                'complex': 'N/A', 'probability': 0.0, 'ic50': 0.0,
-                'affinity': 'Error', 'prediction': f'Error: {e}'}
+        return {
+            'epitope': epitope,
+            'hla_allele': allele,
+            'pseudosequence': 'N/A',
+            'complex': 'N/A',
+            'probability': 0.0,
+            'ic50': 0.0,
+            'affinity': 'Error',
+            'prediction': f'Error: {e}'
+        }
 
 
 def predict_wrapper(ep_input, alleles, k_length, model, tokenizer, hla_db):
@@ -196,16 +213,28 @@ def predict_wrapper(ep_input, alleles, k_length, model, tokenizer, hla_db):
         for km in kmers:
             for al in alleles:
                 r = predict_binding(km, al, model, tokenizer, hla_db)
-                rows.append([raw, km, r['hla_allele'], r['pseudosequence'], r['complex'],
-                             f"{r['probability']:.4f}", f"{r['ic50']:.2f}",
-                             r['affinity'], r['prediction']])
-    return pd.DataFrame(rows, columns=[
-        'Input Sequence', 'Processed k-mer', 'HLA Allele',
-        'Pseudosequence', 'Complex', 'Probability',
-        'IC50 (nM)', 'Affinity', 'Prediction'
-    ])
+                rows.append([
+                    raw,
+                    km,
+                    r['hla_allele'],
+                    r['pseudosequence'],
+                    r['complex'],
+                    f"{r['probability']:.4f}",
+                    f"{r['ic50']:.2f}",
+                    r['affinity'],
+                    r['prediction']
+                ])
+    return pd.DataFrame(
+        rows,
+        columns=[
+            'Input Sequence', 'Processed k-mer', 'HLA Allele',
+            'Pseudosequence', 'Complex', 'Probability',
+            'IC50 (nM)', 'Affinity', 'Prediction'
+        ]
+    )
 
 # ============== Streamlit UI ==============
+
 def main():
     st.set_page_config(page_title="Custommune HLA-I Epitope Binding Prediction", layout="wide")
     st.title("🧬 Custommune HLA-I Epitope Binding Prediction")
@@ -221,14 +250,24 @@ def main():
 
     with st.sidebar:
         st.header("Input Parameters")
-        ep_input = st.text_area("Peptide Sequence(s)", help="Comma-separated epitopes, e.g. SIINFEKL, AGSIINFEKL")
-        k_length = st.number_input("k-mer Length", min_value=1, max_value=15, value=9, step=1)
-        alleles = st.multiselect("HLA Allele(s)", options=human_alleles, default=[default])
+        ep_input = st.text_area(
+            "Peptide Sequence(s)",
+            help="Comma-separated epitopes, e.g. SIINFEKL, AGSIINFEKL"
+        )
+        k_length = st.number_input(
+            "k-mer Length",
+            min_value=1, max_value=15, value=9, step=1
+        )
+        alleles = st.multiselect(
+            "HLA Allele(s)",
+            options=human_alleles,
+            default=[default]
+        )
         if st.button("Predict Binding"):
             if not ep_input.strip():
                 st.warning("Please enter at least one peptide sequence.")
             else:
-                df = predict_wrapper(ep_input, alleles, k_length, model, tokenizer, hla_db)p
+                df = predict_wrapper(ep_input, alleles, k_length, model, tokenizer, hla_db)
                 st.subheader("Prediction Results")
                 st.dataframe(df, use_container_width=True, height=500)
 
