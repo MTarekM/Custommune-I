@@ -1,4 +1,3 @@
-# app.py
 import os
 import sys
 import traceback
@@ -8,13 +7,13 @@ import streamlit as st
 import pandas as pd
 import h5py
 import tensorflow as tf
+from packaging.version import parse as parse_version
 from tensorflow.keras import metrics
 from tensorflow.keras.layers import Layer, MultiHeadAttention, Attention
 from tensorflow.keras.utils import register_keras_serializable
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 
 # ============== Unified Custom Components ==============
-
 @register_keras_serializable(package='CustomMetrics')
 class F1Score(tf.keras.metrics.Metric):
     def __init__(self, name='f1', threshold=0.5, **kwargs):
@@ -34,7 +33,6 @@ class F1Score(tf.keras.metrics.Metric):
 
     def get_config(self):
         return {'threshold': self.threshold}
-
 
 @register_keras_serializable(package='CustomMetrics')
 class NegativePredictiveValue(tf.keras.metrics.Metric):
@@ -62,7 +60,6 @@ class NegativePredictiveValue(tf.keras.metrics.Metric):
     def get_config(self):
         return {'threshold': self.threshold}
 
-
 @register_keras_serializable(package='CustomOptimizers')
 class AdamW(tf.keras.optimizers.legacy.Adam):
     def __init__(self, weight_decay=0.01, **kwargs):
@@ -71,7 +68,7 @@ class AdamW(tf.keras.optimizers.legacy.Adam):
 
     def _resource_apply_dense(self, grad, var, apply_state):
         var_device, var_dtype = var.device, var.dtype.base_dtype
-        coefficients = ((apply_state or {}).get((var_device, var_dtype)) 
+        coefficients = ((apply_state or {}).get((var_device, var_dtype))
                        or self._fallback_apply_state(var_device, var_dtype))
         lr = coefficients['lr_t']
         wd = tf.cast(self.weight_decay, var_dtype)
@@ -83,57 +80,47 @@ class AdamW(tf.keras.optimizers.legacy.Adam):
         config.update({'weight_decay': self.weight_decay})
         return config
 
-
 @register_keras_serializable(package='CustomLayers')
 class SafeAddLayer(Layer):
     def call(self, inputs):
         return tf.add(inputs[0], inputs[1])
-
 
 @register_keras_serializable(package='CustomLayers')
 class Swish(Layer):
     def call(self, inputs):
         return tf.nn.silu(inputs)
 
-
-# ============== File & Version Verification ==============
-
+# ============== File Verification ==============
 def verify_files():
     required_files = {
         'model': 'best_combined_model.h5',
         'tokenizer': 'tokenizer.pkl',
         'hla_db': 'class1_pseudosequences.csv'
     }
-    missing = []
-    for name, path in required_files.items():
-        if not os.path.exists(path):
-            missing.append(path)
+    missing = [p for p in required_files.values() if not os.path.exists(p)]
     if missing:
         raise FileNotFoundError(f"Missing required files: {', '.join(missing)}")
 
-
+# ============== Version Verification (minimum only) ==============
 def verify_versions():
-    required = {'tensorflow': '2.12.0', 'h5py': '3.7.0'}
-    current = {
-        'tensorflow': tf.__version__,
-        'h5py': h5py.__version__
-    }
-    mismatches = [f"{lib} (required {req}, found {current[lib]})"
-                  for lib, req in required.items() if current[lib] != req]
-    if mismatches:
-        raise EnvironmentError("Version mismatch: " + "; ".join(mismatches))
-
+    required_min = {'tensorflow': '2.12.0', 'h5py': '3.7.0'}
+    current = {'tensorflow': tf.__version__, 'h5py': h5py.__version__}
+    too_low = []
+    for lib, min_ver in required_min.items():
+        if parse_version(current[lib]) < parse_version(min_ver):
+            too_low.append(f"{lib} {current[lib]} < required {min_ver}")
+    if too_low:
+        raise EnvironmentError("Version mismatch: " + "; ".join(too_low))
+    else:
+        print(f"✅ Versions OK: TensorFlow {current['tensorflow']}, h5py {current['h5py']}")
 
 # ============== Load Resources (cached) ==============
-
 @st.cache_resource
 def load_model_and_data():
-    # 1) Verify environment
     verify_versions()
     verify_files()
 
-    # 2) Load model
-    custom_objects = {
+    custom_objs = {
         'F1Score': F1Score,
         'NegativePredictiveValue': NegativePredictiveValue,
         'AdamW': AdamW,
@@ -144,20 +131,14 @@ def load_model_and_data():
         'tf.nn.silu': Swish(),
         'tf.__operators__.add': SafeAddLayer(),
     }
-    model = tf.keras.models.load_model(
-        'best_combined_model.h5',
-        custom_objects=custom_objects
-    )
+    model = tf.keras.models.load_model('best_combined_model.h5', custom_objects=custom_objs)
 
-    # 3) Tokenizer
     with open('tokenizer.pkl', 'rb') as f:
         tokenizer = pickle.load(f)
 
-    # 4) HLA DB
     hla_db = pd.read_csv('class1_pseudosequences.csv', header=None)
-    non_human_pattern = r'^BoLA|^Mamu|^Patr|^SLA|^Chi|^DLA|^Eqca|^H-2|^Gogo|^H2'
-    hla_db = hla_db[~hla_db[0].str.contains(non_human_pattern, case=False, regex=True)]
-
+    non_human = r'^BoLA|^Mamu|^Patr|^SLA|^Chi|^DLA|^Eqca|^H-2|^Gogo|^H2'
+    hla_db = hla_db[~hla_db[0].str.contains(non_human, case=False, regex=True)]
     return model, tokenizer, hla_db
 
 
