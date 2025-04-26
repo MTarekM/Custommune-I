@@ -119,42 +119,57 @@ def verify_versions():
 # ============== Load Model, Tokenizer, HLA DB ==============
 @st.cache_resource
 
-# ============== Load Model, Tokenizer, HLA DB ==============
-@st.cache_resource
+
 def load_model_and_data():
     verify_versions()
     verify_files()
 
-    # 1. Register all custom components globally first
+    # 1. Create complete custom objects dictionary
     custom_objs = {
+        # Custom metrics
         'F1Score': F1Score,
         'NegativePredictiveValue': NegativePredictiveValue,
+        
+        # Custom optimizer
         'AdamW': AdamW,
+        
+        # Custom layers
         'SafeAddLayer': SafeAddLayer,
         'Swish': Swish,
+        
+        # TF internal components
         'MultiHeadAttention': MultiHeadAttention,
         'Attention': Attention,
-        'TFOpLambda': TFOpLambda,  # Explicit registration
+        'TFOpLambda': TFOpLambda,
+        
+        # TF operations used in the model
         'tf.nn.silu': tf.nn.silu,
-        'tf.__operators__.add': operator.add
+        'tf.__operators__.add': operator.add,
+        
+        # Special handler for Functional API models
+        'Functional': tf.keras.Model  # Critical for Functional API models
     }
-    
-    # Register with Keras' internal registry
+
+    # 2. Global registration (just to be safe)
     for name, obj in custom_objs.items():
         tf.keras.utils.get_custom_objects()[name] = obj
 
-    # 2. Load model using the correct method
+    # 3. Load model with safety wrapper
     try:
         model = tf.keras.models.load_model(
             'best_combined_model.h5',
             custom_objects=custom_objs,
             compile=False  # Disable compilation if not needed
         )
-    except ValueError as e:
-        st.error(f"Model loading failed: {str(e)}")
+    except Exception as e:
+        st.error(f"""Model loading failed: {str(e)}
+                 Ensure:
+                 1. Model was saved with model.save() in TF 2.12+
+                 2. All custom components are properly registered
+                 3. No incompatible TF version changes""")
         st.stop()
 
-    # Rest of your loading code...
+    # Rest of loading code...
     with open('tokenizer.pkl', 'rb') as f:
         tokenizer = pickle.load(f)
 
@@ -163,6 +178,7 @@ def load_model_and_data():
     hla_db = hla_db[~hla_db[0].str.contains(pattern, case=False, regex=True)]
 
     return model, tokenizer, hla_db
+
 
 # ============== Preprocessing & Prediction ==============
 def preprocess_sequence(seq, tokenizer, max_length=50):
