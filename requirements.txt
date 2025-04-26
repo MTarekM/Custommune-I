@@ -1,7 +1,6 @@
-pandas
-tensorflow>=2.16.1  # First version with Python 3.12 support
-pandas
+tensorflow>=2.16.1
+pandas>=2.0.3
+h5py>=3.10.0
 tqdm
 scikit-learn
 protobuf<4.0.0  # Add this line
-h5py==3.7.0
