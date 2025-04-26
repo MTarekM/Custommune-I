@@ -18,7 +18,7 @@ from tensorflow.python.keras.layers.core import TFOpLambda
 
 # ─── Register internal ops and layers ─────────────────────────────────────────
 tf.keras.utils.get_custom_objects()['TFOpLambda'] = TFOpLambda
- tf.keras.utils.get_custom_objects()['tf.nn.silu'] = tf.nn.silu
+tf.keras.utils.get_custom_objects()['tf.nn.silu'] = tf.nn.silu
 tf.keras.utils.get_custom_objects()['tf.__operators__.add'] = operator.add
 
 # ============== Unified Custom Components ==============
@@ -121,7 +121,6 @@ def load_model_and_data():
     verify_versions()
     verify_files()
 
-    # Custom objs for reconstruction
     custom_objs = {
         'F1Score': F1Score,
         'NegativePredictiveValue': NegativePredictiveValue,
@@ -227,7 +226,6 @@ def main():
                 st.subheader("Prediction Results")
                 st.dataframe(df, use_container_width=True, height=500)
 
-    # Hide Streamlit footer/menu
     st.markdown("""
         <style>#MainMenu{visibility:hidden;} footer{visibility:hidden;}</style>
     """, unsafe_allow_html=True)
