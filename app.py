@@ -19,7 +19,7 @@ import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TensorFlow logs
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # Disable GPU
 
-# ============== Custom Components ==============
+# ============== Updated Custom Components ==============
 @register_keras_serializable(package='CustomMetrics')
 class F1Score(tf.keras.metrics.Metric):
     def __init__(self, name='f1', threshold=0.5, **kwargs):
@@ -66,9 +66,6 @@ class SafeAddLayer(Layer):
         if isinstance(inputs, list):
             return tf.add(inputs[0], inputs[1])
         return tf.add(inputs, inputs)
-    
-    def get_config(self):
-        return super().get_config()
 
 @register_keras_serializable(package='CustomLayers')
 class Swish(Layer):
@@ -155,49 +152,28 @@ def verify_versions():
             raise EnvironmentError(f"Version mismatch for {lib}: Required {ver}, Found {current[lib]}")
 
 @st.cache_resource
+@st.cache_resource
 def load_model_with_custom_objects():
     custom_objects = {
         'F1Score': F1Score,
-        'NegativePredictiveValue': NegativePredictiveValue,
-        'AdamW': AdamW,
         'SafeAddLayer': SafeAddLayer,
         'Swish': Swish,
-        'RobustMultiHeadAttention': RobustMultiHeadAttention,
-        'MultiHeadAttention': RobustMultiHeadAttention,
-        'UniversalLambda': UniversalLambda,
-        'TFOpLambda': UniversalLambda,
-        'Lambda': UniversalLambda,
+        'MultiHeadAttention': MultiHeadAttention,
+        'Attention': Attention,
         'tf.nn.silu': Swish(),
         'tf.__operators__.add': SafeAddLayer(),
-        'operators.add': SafeAddLayer(),
-        'Attention': Attention,
         'keras': tf.keras
     }
 
-    tf.keras.config.enable_unsafe_deserialization = True
-    
     try:
-        # Primary load attempt
-        model = tf.keras.models.load_model(
+        return tf.keras.models.load_model(
             'best_combined_model.h5',
             custom_objects=custom_objects
         )
     except Exception as e:
-        # Fallback strategy
-        try:
-            with h5py.File('best_combined_model.h5', 'r') as f:
-                model_config = f.attrs.get('model_config')
-                if model_config is None:
-                    raise ValueError("No model config found in HDF5 file")
-                
-                # Corrected line with proper parenthesis
-                model = model_from_json(
-                    json.dumps(json.loads(model_config)),  # Fixed syntax
-                    custom_objects=custom_objects
-                )
-                model.load_weights(f['model_weights'])
-        except Exception as fallback_error:
-            raise RuntimeError(f"Model loading failed: {str(fallback_error)}") from fallback_error
+        st.error(f"Model loading failed: {str(e)}")
+        st.stop()
+
 
 @st.cache_data
 def load_tokenizer():
