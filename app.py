@@ -4,7 +4,6 @@ import streamlit as st
 import tensorflow as tf
 import pandas as pd
 import pickle
-import os
 import sys
 import traceback
 import numpy as np
@@ -13,7 +12,8 @@ from tensorflow.keras.models import model_from_json
 from tensorflow.keras import metrics
 from tensorflow.keras.utils import register_keras_serializable
 from tensorflow.keras.preprocessing.sequence import pad_sequences
-
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TensorFlow info messages
 # ============== Custom Components ==============
 @register_keras_serializable(package='CustomMetrics')
 class F1Score(tf.keras.metrics.Metric):
@@ -59,8 +59,24 @@ class AdamW(tf.keras.optimizers.legacy.Adam):
 @register_keras_serializable(package='CustomLayers')
 class SafeAddLayer(Layer):
     def call(self, inputs):
-        return tf.add(inputs[0], inputs[1])
-
+        # Handle both single tensor and list inputs
+        if isinstance(inputs, list):
+            return tf.add(inputs[0], inputs[1])
+        return tf.add(inputs, inputs)
+    
+    def get_config(self):
+        return super().get_config()
+@register_keras_serializable(package='CustomLayers')
+class GenericLambda(Layer):
+    def __init__(self, func, **kwargs):
+        super().__init__(**kwargs)
+        self.func = func
+    
+    def call(self, inputs):
+        return self.func(inputs)
+    
+    def get_config(self):
+        return {'func': self.func}
 @register_keras_serializable(package='CustomLayers')
 class Swish(Layer):
     def call(self, inputs):
@@ -120,9 +136,11 @@ def verify_versions():
             raise EnvironmentError(f"Version mismatch for {lib}: Required {ver}, Found {current[lib]}")
 
 @st.cache_resource
+
 def load_model_with_custom_objects():
-    # Custom objects registration
+    # Custom objects configuration
     custom_objects = {
+        # Original custom components
         'F1Score': F1Score,
         'NegativePredictiveValue': NegativePredictiveValue,
         'AdamW': AdamW,
@@ -130,25 +148,30 @@ def load_model_with_custom_objects():
         'Swish': Swish,
         'MultiHeadAttention': MultiHeadAttention,
         'Attention': Attention,
+        
+        # Handle TensorFlow internal operations
         'TFOpLambda': tf.keras.layers.Lambda,
-        'keras': tf.keras,
-        # Replace operator reference with layer-based solution
+        'tf.__operators__.add': SafeAddLayer(),
         'add': SafeAddLayer(),
-        # Add any custom lambda layer references
-        '<lambda>': SafeAddLayer()
+        '<lambda>': SafeAddLayer(),
+        
+        # Framework reference
+        'keras': tf.keras
     }
 
-    # Enable unsafe deserialization first
+    # Enable legacy model loading
     tf.keras.config.enable_unsafe_deserialization = True
     
+    # Load model with custom objects
     model = tf.keras.models.load_model(
         'best_combined_model.h5',
         custom_objects=custom_objects
+        custom_objects['GenericLambda'] = GenericLambda
     )
     
     # Verify model functionality
-    dummy_input = np.zeros((1, 50))  # Match your model's input shape
     try:
+        dummy_input = np.zeros((1, 50))  # Match your model's input shape
         model.predict(dummy_input)
     except Exception as e:
         raise RuntimeError("Model verification failed") from e
