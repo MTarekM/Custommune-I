@@ -311,7 +311,7 @@ def main():
                                 'Affinity': result['affinity'],
                                 'Prediction': result['prediction']
                             })
-                        progress = ((i * len(selected_alleles)) + (alleles.index(allele)+1) / total_steps
+                        progress = ((i * len(selected_alleles)) + (alleles.index(allele)+1)) / total_steps
                         progress_bar.progress(min(progress, 1.0))
                 
                 df = pd.DataFrame(results)
