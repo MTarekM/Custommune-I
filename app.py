@@ -12,7 +12,16 @@ from tensorflow.keras import metrics
 from tensorflow.keras.layers import Layer, MultiHeadAttention, Attention
 from tensorflow.keras.utils import register_keras_serializable
 from tensorflow.keras.preprocessing.sequence import pad_sequences
+import operator
+import tensorflow as tf
 from tensorflow.python.keras.layers.core import TFOpLambda
+
+# ─── Register TFOpLambda itself ───────────────────────────────────────────────
+tf.keras.utils.get_custom_objects()['TFOpLambda'] = TFOpLambda
+
+tf.keras.utils.get_custom_objects()['tf.nn.silu'] = tf.nn.silu
+tf.keras.utils.get_custom_objects()['tf.__operators__.add'] = operator.add
+
 # ============== Unified Custom Components ==============
 @register_keras_serializable(package='CustomMetrics')
 class F1Score(tf.keras.metrics.Metric):
@@ -116,10 +125,12 @@ def verify_versions():
 
 # ============== Load Resources (cached) ==============
 @st.cache_resource
+@st.cache_resource
 def load_model_and_data():
     verify_versions()
     verify_files()
 
+    # you no longer need to include TFOpLambda or the ops here
     custom_objs = {
         'F1Score': F1Score,
         'NegativePredictiveValue': NegativePredictiveValue,
@@ -128,19 +139,17 @@ def load_model_and_data():
         'Swish': Swish,
         'MultiHeadAttention': MultiHeadAttention,
         'Attention': Attention,
-        'tf.nn.silu': Swish(),
-        'tf.__operators__.add': SafeAddLayer(),
-        'TFOpLambda': TFOpLambda,
+        # tf.nn.silu and tf.__operators__.add are already in get_custom_objects()
     }
-    model = tf.keras.models.load_model('best_combined_model.h5', custom_objects=custom_objs)
+    model = tf.keras.models.load_model(
+        'best_combined_model.h5',
+        custom_objects=custom_objs,
+        compile=False     # safe when you only need predict()
+    )
 
-    with open('tokenizer.pkl', 'rb') as f:
-        tokenizer = pickle.load(f)
-
-    hla_db = pd.read_csv('class1_pseudosequences.csv', header=None)
-    non_human = r'^BoLA|^Mamu|^Patr|^SLA|^Chi|^DLA|^Eqca|^H-2|^Gogo|^H2'
-    hla_db = hla_db[~hla_db[0].str.contains(non_human, case=False, regex=True)]
+    # … load tokenizer, hla_db, etc …
     return model, tokenizer, hla_db
+
 
 
 # ============== Preprocessing & Prediction ==============
