@@ -149,16 +149,14 @@ def load_model_with_custom_objects():
         'Swish': Swish,
         'MultiHeadAttention': MultiHeadAttention,
         'Attention': Attention,
-        'GenericLambda': GenericLambda,
         
-        # Handle TensorFlow internal operations
-        'TFOpLambda': tf.keras.layers.Lambda,
+        # Replace problematic Lambda handling
         'tf.__operators__.add': SafeAddLayer(),
         'add': SafeAddLayer(),
-        '<lambda>': GenericLambda(lambda x: x),
         
-        # Framework reference
-        'keras': tf.keras
+        # Remove GenericLambda and TFOpLambda
+        # Add explicit handler for any remaining Lambda layers
+        'lambda': tf.keras.layers.Lambda(lambda x: x)
     }
 
     # Enable legacy model loading
