@@ -165,7 +165,7 @@ def load_model_with_custom_objects():
     # Load model with custom objects
     model = tf.keras.models.load_model(
         'best_combined_model.h5',
-        custom_objects=custom_objects
+        custom_objects=custom_objects,
         custom_objects['GenericLambda'] = GenericLambda
     )
     
