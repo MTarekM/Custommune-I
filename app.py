@@ -118,6 +118,7 @@ def verify_versions():
 
 # ============== Load Model, Tokenizer, HLA DB ==============
 @st.cache_resource
+
 def load_model_and_data():
     verify_versions()
     verify_files()
@@ -129,13 +130,17 @@ def load_model_and_data():
         'SafeAddLayer': SafeAddLayer,
         'Swish': Swish,
         'MultiHeadAttention': MultiHeadAttention,
-        'Attention': Attention
+        'Attention': Attention,
+        'TFOpLambda': TFOpLambda,  # Explicitly include TFOpLambda
+        'tf.nn.silu': tf.nn.silu,  # Register silu activation
+        'tf.__operators__.add': operator.add  # Handle add operations
     }
-    with h5py.File('best_combined_model.h5', 'r') as f:
-        raw = f.attrs.get('model_config')
-    model_json = raw.decode('utf-8') if isinstance(raw, (bytes, bytearray)) else raw
-    model = model_from_json(model_json, custom_objects=custom_objs)
-    model.load_weights('best_combined_model.h5')
+
+    # Load model directly with custom objects
+    model = tf.keras.models.load_model(
+        'best_combined_model.h5',
+        custom_objects=custom_objs
+    )
 
     with open('tokenizer.pkl', 'rb') as f:
         tokenizer = pickle.load(f)
