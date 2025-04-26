@@ -130,10 +130,10 @@ def verify_versions():
 # ============== Load Model, Tokenizer, HLA DB ==============
 @st.cache_resource
 def load_model_and_data():
-    verify_versions()  # Ensure TF 2.12+ and h5py 3.7+
-    verify_files()     # Check for required files
+    verify_versions()
+    verify_files()
 
-    # 1. Comprehensive custom object registration
+    # Unified custom object registry
     custom_objects = {
         # Core components
         'Functional': tf.keras.Model,
@@ -148,46 +148,40 @@ def load_model_and_data():
         
         # TensorFlow operations
         'tf.nn.silu': tf.nn.silu,
-        'tf.__operators__.add': operator.add,
-        'tf': tf  # Wildcard for any tf.* operations
+        'tf.__operators__.add': operator.add
     }
 
-    # 2. Dual registration strategy
-    # Global registration
+    # Dual registration strategy
     for name, obj in custom_objects.items():
         tf.keras.utils.get_custom_objects()[name] = obj
-        
-    # Local scope registration
+
     with tf.keras.utils.custom_object_scope(custom_objects):
         try:
-            # 3. Load model with architecture validation
+            # Load model with scope-based custom objects
             model = tf.keras.models.load_model(
                 'best_combined_model.h5',
-                compile=False,
-                custom_objects={
-                'TFOpLambda': TFOpLambda,
-                'tf.nn.silu': tf.nn.silu,
-                'tf.__operators__.add': operator.add,}
-
+                compile=False  # Remove explicit custom_objects parameter
             )
             
-            # 4. Verify layer integrity
+            # Layer verification
             problematic_layers = [
                 layer for layer in model.layers 
-                if isinstance(layer, TFOpLambda)
+                if isinstance(layer, TFOpLambda) and 
+                layer.symbol not in tf.keras.utils.get_custom_objects()
             ]
             
             if problematic_layers:
-                st.error(f"Found {len(problematic_layers)} unregistered lambda layers")
+                st.error(f"Unregistered lambda layers: {problematic_layers}")
                 st.stop()
                 
         except Exception as e:
-            st.error(f"""Model loading failed: {str(e)}
-                     Final Verification Checklist:
-                     1. Model saved with model.save() in TF 2.12+
-                     2. No lambda layers requiring special handling
-                     3. TensorFlow version match (2.12.x)
-                     4. All custom classes match original implementation""")
+            error_msg = f"""Model loading failed: {str(e)}
+            Verification Checklist:
+            1. Confirm model saved with model.save() in TF 2.12+
+            2. Validate all custom components are registered
+            3. Check TF version consistency (2.12.x)
+            4. Ensure custom class implementations match training"""
+            st.error(error_msg)
             st.stop()
 
     # Load supporting data
