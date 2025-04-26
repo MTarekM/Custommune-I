@@ -12,7 +12,7 @@ from tensorflow.keras import metrics
 from tensorflow.keras.layers import Layer, MultiHeadAttention, Attention
 from tensorflow.keras.utils import register_keras_serializable
 from tensorflow.keras.preprocessing.sequence import pad_sequences
-
+from tensorflow.python.keras.layers.core import TFOpLambda
 # ============== Unified Custom Components ==============
 @register_keras_serializable(package='CustomMetrics')
 class F1Score(tf.keras.metrics.Metric):
@@ -130,6 +130,7 @@ def load_model_and_data():
         'Attention': Attention,
         'tf.nn.silu': Swish(),
         'tf.__operators__.add': SafeAddLayer(),
+        'TFOpLambda': TFOpLambda,
     }
     model = tf.keras.models.load_model('best_combined_model.h5', custom_objects=custom_objs)
 
