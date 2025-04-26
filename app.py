@@ -128,33 +128,18 @@ def load_model_and_data():
 
     # 1. Create complete custom objects specification
     custom_objs = {
-        # Custom metrics
         'F1Score': F1Score,
         'NegativePredictiveValue': NegativePredictiveValue,
-        
-        # Custom optimizer
         'AdamW': AdamW,
-        
-        # Custom layers
         'SafeAddLayer': SafeAddLayer,
         'Swish': Swish,
-        
-        # Essential TF components
         'MultiHeadAttention': MultiHeadAttention,
         'Attention': Attention,
-        
-        # Critical TFOpLambda handler
-        'TFOpLambda': TFOpLambda,#'TFOpLambda': lambda **config: TFOpLambda.from_config(config),
-        
-        # TF operations used in the model
+        'TFOpLambda': TFOpLambda,  # <-- NOT lambda function, real class
         'tf.nn.silu': tf.nn.silu,
         'tf.__operators__.add': operator.add,
-        
-        # Functional API specification
         'Functional': tf.keras.Model,
-        
-        # Add any other TF operations used in lambda layers
-        'tf': tf  # Safety blanket for any tf.* operations
+        'tf': tf  # optional safety net
     }
 
     # 2. Double-registration pattern
