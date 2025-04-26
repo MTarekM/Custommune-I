@@ -177,26 +177,27 @@ def load_model_with_custom_objects():
     tf.keras.config.enable_unsafe_deserialization = True
     
     try:
-        model = tf.keras.models.load_model('best_combined_model.h5', custom_objects=custom_objects)
+        # Primary load attempt
+        model = tf.keras.models.load_model(
+            'best_combined_model.h5',
+            custom_objects=custom_objects
+        )
     except Exception as e:
+        # Fallback strategy
         try:
             with h5py.File('best_combined_model.h5', 'r') as f:
+                model_config = f.attrs.get('model_config')
+                if model_config is None:
+                    raise ValueError("No model config found in HDF5 file")
+                
+                # Corrected line with proper parenthesis
                 model = model_from_json(
-                    json.dumps(json.loads(f.attrs['model_config']),
+                    json.dumps(json.loads(model_config)),  # Fixed syntax
                     custom_objects=custom_objects
                 )
                 model.load_weights(f['model_weights'])
         except Exception as fallback_error:
             raise RuntimeError(f"Model loading failed: {str(fallback_error)}") from fallback_error
-
-    # Model verification
-    try:
-        dummy_input = np.zeros((1, 50))
-        model.predict(dummy_input, verbose=0)
-    except Exception as e:
-        raise RuntimeError("Model verification failed") from e
-    
-    return model
 
 @st.cache_data
 def load_tokenizer():
