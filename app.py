@@ -13,7 +13,7 @@ from tensorflow.keras import metrics
 from tensorflow.keras.layers import Layer, MultiHeadAttention, Attention
 from tensorflow.keras.utils import register_keras_serializable
 from tensorflow.keras.preprocessing.sequence import pad_sequences
-from tensorflow.keras.models import model_from_json
+from tensorflow.keras.models import model_from_json, Functional
 from tensorflow.python.keras.layers.core import TFOpLambda
 
 # ─── Register internal ops and layers ─────────────────────────────────────────
@@ -128,7 +128,8 @@ def load_model_and_data():
         'SafeAddLayer': SafeAddLayer,
         'Swish': Swish,
         'MultiHeadAttention': MultiHeadAttention,
-        'Attention': Attention
+        'Attention': Attention,
+        'Functional': Functional
     }
     # Workaround: load from JSON + weights
     with h5py.File('best_combined_model.h5', 'r') as f:
@@ -151,8 +152,10 @@ def preprocess_sequence(seq, tokenizer, max_length=50):
     enc = tokenizer.texts_to_sequences([seq])
     return pad_sequences(enc, maxlen=max_length, padding='post')
 
+
 def generate_kmers(seq, k=9):
     return [seq[i:i+k] for i in range(len(seq)-k+1)] if len(seq) >= k else [seq]
+
 
 def predict_binding(epitope, allele, model, tokenizer, hla_db, threshold=0.5):
     try:
@@ -180,6 +183,7 @@ def predict_binding(epitope, allele, model, tokenizer, hla_db, threshold=0.5):
         return dict(epitope=epitope, hla_allele=allele, pseudosequence='N/A',
                     complex='N/A', probability=0.0, ic50=0.0,
                     affinity='Error', prediction=f'Error: {e}')
+
 
 def predict_wrapper(ep_input, alleles, k_length, model, tokenizer, hla_db):
     eps = [e.strip() for e in ep_input.split(',') if e.strip()]
