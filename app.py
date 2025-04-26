@@ -9,14 +9,14 @@ import sys
 import traceback
 import numpy as np
 from tensorflow.keras.layers import Layer, MultiHeadAttention, Attention
-from tensorflow.keras.models import model_from_json
+from tensorflow.keras.models import save_model, load_model
 from tensorflow.keras import metrics
 from tensorflow.keras.utils import register_keras_serializable
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 import os
 
-# Environment Configuration
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TensorFlow logs
+# ============== Environment Configuration ==============
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress all TensorFlow logs
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # Disable GPU
 
 # ============== Custom Components ==============
@@ -41,24 +41,11 @@ class F1Score(tf.keras.metrics.Metric):
         return {'threshold': self.threshold}
 
 @register_keras_serializable(package='CustomLayers')
-
 class SafeAddLayer(Layer):
     def call(self, inputs):
-        if isinstance(inputs, list):
+        if isinstance(inputs, list) and len(inputs) == 2:
             return tf.add(inputs[0], inputs[1])
         return tf.add(inputs, inputs)
-    
-    def get_config(self):
-        config = super().get_config()
-        # Add any custom config parameters here
-        return config
-
-    @classmethod
-    def from_config(cls, config):
-        # Filter out unexpected arguments before creating instance
-        expected_args = inspect.getfullargspec(cls.__init__).args
-        filtered_config = {k: v for k, v in config.items() if k in expected_args}
-        return cls(**filtered_config)
     
     def get_config(self):
         return super().get_config()
@@ -84,7 +71,7 @@ class RobustMultiHeadAttention(MultiHeadAttention):
 # ============== Core Functions ==============
 def verify_files():
     required_files = {
-        'model': 'best_combined_model.h5',
+        'model': 'best_combined_model.h5',  # Updated to Keras 3 format
         'tokenizer': 'tokenizer.pkl',
         'hla_db': 'class1_pseudosequences.csv'
     }
@@ -93,26 +80,27 @@ def verify_files():
         raise FileNotFoundError(f"Missing required files: {', '.join(missing)}")
 
 @st.cache_resource
-
-@st.cache_resource
 def load_model():
     custom_objects = {
         'CustomMetrics>F1Score': F1Score,
         'CustomLayers>SafeAddLayer': SafeAddLayer,
         'CustomLayers>Swish': Swish,
         'CustomLayers>RobustMultiHeadAttention': RobustMultiHeadAttention,
-        # Handle TensorFlow add operation serialization
-        'tf.operators.add': SafeAddLayer,
-        'TFOpLambda': SafeAddLayer,
-        'keras': tf.keras
+        'MultiHeadAttention': RobustMultiHeadAttention
     }
 
     try:
-        return tf.keras.models.load_model('converted_model', custom_objects=custom_objects)
+        return tf.keras.models.load_model(
+            'best_combined_model.h5',
+            custom_objects=custom_objects,
+            compile=False
+        )
     except Exception as e:
         st.error(f"""Model loading failed: {str(e)}
-                  Ensure the model contains only valid custom layers""")
+                  Ensure you've converted the model using:
+                  model.save('model.keras', save_format='keras')""")
         st.stop()
+
 @st.cache_data
 def load_tokenizer():
     with open('tokenizer.pkl', 'rb') as f:
@@ -137,7 +125,7 @@ def predict_binding(epitope, hla_allele, model, tokenizer, hla_db, threshold=0.5
         hla_seq = hla_db.loc[hla_db[0] == hla_allele, 1].values[0]
         combined = f"{epitope}-{hla_seq}"
         proc = preprocess_sequence(combined, tokenizer)
-        prob = float(model.predict(proc, verbose=0)[0][0])
+        prob = float(model.predict(proc, verbose=0)[0][0]
         
         IC50_MIN = 0.1
         IC50_MAX = 50000.0
