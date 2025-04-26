@@ -140,6 +140,7 @@ def verify_versions():
 @st.cache_resource
 def load_model_with_custom_objects():
     # Custom objects configuration
+    # Update the custom_objects definition in load_model_with_custom_objects()
     custom_objects = {
         # Original custom components
         'F1Score': F1Score,
@@ -149,14 +150,17 @@ def load_model_with_custom_objects():
         'Swish': Swish,
         'MultiHeadAttention': MultiHeadAttention,
         'Attention': Attention,
+    
+        # Key fix: Map TFOpLambda to a compatible implementation
+        'TFOpLambda': SafeAddLayer,  # Handles TensorFlow operation wrappers
         
-        # Replace problematic Lambda handling
+        # Operation type mappings
         'tf.__operators__.add': SafeAddLayer(),
         'add': SafeAddLayer(),
-        
-        # Remove GenericLambda and TFOpLambda
-        # Add explicit handler for any remaining Lambda layers
-        'lambda': tf.keras.layers.Lambda(lambda x: x)
+        '<lambda>': tf.keras.layers.Lambda(lambda x: x),
+    
+        # Framework reference
+        'keras': tf.keras
     }
 
     # Enable legacy model loading
