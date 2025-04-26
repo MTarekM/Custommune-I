@@ -1,4 +1,3 @@
-# app.py
 import json
 import h5py
 import streamlit as st
@@ -8,6 +7,7 @@ import pickle
 import os
 import sys
 import traceback
+import numpy as np
 from tensorflow.keras.layers import Layer, MultiHeadAttention, Attention
 from tensorflow.keras.models import model_from_json
 from tensorflow.keras import metrics
@@ -109,8 +109,7 @@ def verify_files():
         raise FileNotFoundError(f"Missing required files: {', '.join(missing)}")
 
 def verify_versions():
-    required = {'tensorflow': '2.19.0', 'h5py': '3.13.0'}  # Match your requirements.txt
-    
+    required = {'tensorflow': '2.19.0', 'h5py': '3.13.0'}
     current = {
         'tensorflow': tf.__version__,
         'h5py': h5py.__version__
@@ -130,14 +129,25 @@ def load_model_with_custom_objects():
         'Swish': Swish,
         'MultiHeadAttention': MultiHeadAttention,
         'Attention': Attention,
+        'TFOpLambda': tf.keras.layers.Lambda,
         'tf.nn.silu': Swish(),
         'tf.__operators__.add': SafeAddLayer(),
+        'keras': tf.keras,
     }
     
-    return tf.keras.models.load_model(
+    model = tf.keras.models.load_model(
         'best_combined_model.h5',
         custom_objects=custom_objects
     )
+    
+    # Verify model functionality
+    dummy_input = np.zeros((1, 50))  # Match your model's input shape
+    try:
+        model.predict(dummy_input)
+    except Exception as e:
+        raise RuntimeError("Model verification failed") from e
+    
+    return model
 
 @st.cache_data
 def load_tokenizer():
@@ -162,7 +172,7 @@ def predict_binding(epitope, hla_allele, model, tokenizer, hla_db, threshold=0.5
         hla_seq = hla_db.loc[hla_db[0] == hla_allele, 1].values[0]
         combined = f"{epitope}-{hla_seq}"
         proc = preprocess_sequence(combined, tokenizer)
-        prob = float(model.predict(proc, verbose=0)[0][0])
+        prob = float(model.predict(proc, verbose=0)[0][0]
         
         IC50_MIN = 0.1
         IC50_MAX = 50000.0
@@ -206,7 +216,6 @@ def predict_binding(epitope, hla_allele, model, tokenizer, hla_db, threshold=0.5
 
 # ============== Streamlit UI ==============
 def main():
-    tf.keras.config.enable_unsafe_deserialization = True  # Needed for older model formats
     st.set_page_config(
         page_title="Custommune HLA Predictor",
         page_icon="🧬",
@@ -217,21 +226,20 @@ def main():
     st.title("Custommune HLA-I Epitope Binding Prediction")
     
     try:
-        # Initialize components
+        # Enable unsafe deserialization first
+        tf.keras.config.enable_unsafe_deserialization = True
+        
         verify_files()
         verify_versions()
         model = load_model_with_custom_objects()
         tokenizer = load_tokenizer()
         hla_db = load_hla_database()
         
-        # Get HLA alleles
         human_alleles = sorted(hla_db[0].tolist())
         default_allele = next((a for a in ['HLA-A01:01', 'HLA-A*01:01'] if a in human_alleles), human_alleles[0])
         
-        # Sidebar controls
         with st.sidebar:
             st.header("Input Parameters")
-            
             ep_input = st.text_area(
                 "Peptide Sequence(s)",
                 help="Enter comma-separated epitopes (e.g., SIINFEKL, AGSIINFEKL)",
@@ -262,10 +270,8 @@ def main():
                 help="Probability threshold for binding classification"
             )
             
-            st.info("Click the button below to run predictions")
             run_analysis = st.button("Run Analysis", type="primary")
 
-        # Main content area
         if run_analysis:
             if not ep_input.strip():
                 st.error("Please enter at least one peptide sequence")
@@ -313,13 +319,12 @@ def main():
                                 'Affinity': result['affinity'],
                                 'Prediction': result['prediction']
                             })
-                        progress = ((i * len(selected_alleles)) + (alleles.index(allele)+1)) / total_steps
+                        progress = ((i * len(selected_alleles)) + (selected_alleles.index(allele)+1)) / total_steps
                         progress_bar.progress(min(progress, 1.0))
                 
                 df = pd.DataFrame(results)
                 st.success("Analysis completed!")
                 
-                # Display results
                 st.subheader("Prediction Results")
                 st.dataframe(
                     df,
@@ -335,7 +340,6 @@ def main():
                     }
                 )
                 
-                # Export options
                 st.download_button(
                     label="Download Results as CSV",
                     data=df.to_csv(index=False).encode('utf-8'),
