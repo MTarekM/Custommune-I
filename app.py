@@ -57,15 +57,30 @@ class AdamW(tf.keras.optimizers.legacy.Adam):
         return config
 
 @register_keras_serializable(package='CustomLayers')
+
 class SafeAddLayer(Layer):
+    def __init__(self, **kwargs):
+        # Filter out unexpected arguments before passing to super
+        self._function = kwargs.pop('function', None)  # Capture but ignore
+        super().__init__(**kwargs)
+    
     def call(self, inputs):
-        # Handle both single tensor and list inputs
+        # Maintain original functionality
         if isinstance(inputs, list):
             return tf.add(inputs[0], inputs[1])
         return tf.add(inputs, inputs)
     
     def get_config(self):
-        return super().get_config()
+        # Return only expected configuration
+        config = super().get_config()
+        return config
+
+    @classmethod
+    def from_config(cls, config):
+        # Filter out unexpected config entries
+        safe_keys = ['name', 'trainable', 'dtype']
+        safe_config = {k: config[k] for k in safe_keys if k in config}
+        return cls(**safe_config)
 @register_keras_serializable(package='CustomLayers')
 class GenericLambda(Layer):
     def __init__(self, func, **kwargs):
@@ -144,13 +159,14 @@ def load_model_with_custom_objects():
         'F1Score': F1Score,
         'NegativePredictiveValue': NegativePredictiveValue,
         'AdamW': AdamW,
-        'SafeAddLayer': SafeAddLayer,
         'Swish': Swish,
         
         # TensorFlow operation mappings
         'tf.nn.silu': Swish(),
+        'SafeAddLayer': SafeAddLayer,
         'tf.__operators__.add': SafeAddLayer(),
-        'TFOpLambda': SafeAddLayer,  # Critical fix for missing layer
+        'TFOpLambda': SafeAddLayer,  # Handle TensorFlow operation wrappers
+        'operators.add': SafeAddLayer(),
         
         # Standard layers
         'MultiHeadAttention': MultiHeadAttention,
