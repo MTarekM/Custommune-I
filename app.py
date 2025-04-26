@@ -14,11 +14,9 @@ from tensorflow.keras.layers import Layer, MultiHeadAttention, Attention
 from tensorflow.keras.utils import register_keras_serializable
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from tensorflow.keras.models import model_from_json
-from keras.engine.functional import Functional
 from tensorflow.python.keras.layers.core import TFOpLambda
 
 # ─── Register internal ops and layers ─────────────────────────────────────────
-# Ensure TFOpLambda and wrapped ops are known globally
 tf.keras.utils.get_custom_objects()['TFOpLambda'] = TFOpLambda
 tf.keras.utils.get_custom_objects()['tf.nn.silu'] = tf.nn.silu
 tf.keras.utils.get_custom_objects()['tf.__operators__.add'] = operator.add
@@ -101,7 +99,6 @@ class Swish(Layer):
         return tf.nn.silu(inputs)
 
 # ============== File & Version Verification ==============
-
 def verify_files():
     required = ['best_combined_model.h5', 'tokenizer.pkl', 'class1_pseudosequences.csv']
     missing = [f for f in required if not os.path.exists(f)]
@@ -120,7 +117,6 @@ def verify_versions():
         print(f"✅ Versions OK: TF {curr['tensorflow']}, h5py {curr['h5py']}")
 
 # ============== Load Model, Tokenizer, HLA DB ==============
-
 @st.cache_resource
 def load_model_and_data():
     verify_versions()
@@ -133,8 +129,7 @@ def load_model_and_data():
         'SafeAddLayer': SafeAddLayer,
         'Swish': Swish,
         'MultiHeadAttention': MultiHeadAttention,
-        'Attention': Attention,
-        'Functional': Functional
+        'Attention': Attention
     }
     with h5py.File('best_combined_model.h5', 'r') as f:
         raw = f.attrs.get('model_config')
@@ -152,15 +147,12 @@ def load_model_and_data():
     return model, tokenizer, hla_db
 
 # ============== Preprocessing & Prediction ==============
-
 def preprocess_sequence(seq, tokenizer, max_length=50):
     enc = tokenizer.texts_to_sequences([seq])
     return pad_sequences(enc, maxlen=max_length, padding='post')
 
-
 def generate_kmers(seq, k=9):
     return [seq[i:i+k] for i in range(len(seq)-k+1)] if len(seq) >= k else [seq]
-
 
 def predict_binding(epitope, allele, model, tokenizer, hla_db, threshold=0.5):
     try:
@@ -181,28 +173,9 @@ def predict_binding(epitope, allele, model, tokenizer, hla_db, threshold=0.5):
             aff = "Low"
         else:
             aff = "Non-Binder"
-        return {
-            'epitope': epitope,
-            'hla_allele': allele,
-            'pseudosequence': hla_seq,
-            'complex': combo,
-            'probability': prob,
-            'ic50': ic50,
-            'affinity': aff,
-            'prediction': 'Binder' if prob >= threshold else 'Non-Binder'
-        }
+        return {'epitope': epitope, 'hla_allele': allele, 'pseudosequence': hla_seq, 'complex': combo, 'probability': prob, 'ic50': ic50, 'affinity': aff, 'prediction': 'Binder' if prob >= threshold else 'Non-Binder'}
     except Exception as e:
-        return {
-            'epitope': epitope,
-            'hla_allele': allele,
-            'pseudosequence': 'N/A',
-            'complex': 'N/A',
-            'probability': 0.0,
-            'ic50': 0.0,
-            'affinity': 'Error',
-            'prediction': f'Error: {e}'
-        }
-
+        return {'epitope': epitope, 'hla_allele': allele, 'pseudosequence': 'N/A', 'complex': 'N/A', 'probability': 0.0, 'ic50': 0.0, 'affinity': 'Error', 'prediction': f'Error: {e}'}
 
 def predict_wrapper(ep_input, alleles, k_length, model, tokenizer, hla_db):
     eps = [e.strip() for e in ep_input.split(',') if e.strip()]
@@ -215,32 +188,13 @@ def predict_wrapper(ep_input, alleles, k_length, model, tokenizer, hla_db):
         for km in kmers:
             for al in alleles:
                 r = predict_binding(km, al, model, tokenizer, hla_db)
-                rows.append([
-                    raw,
-                    km,
-                    r['hla_allele'],
-                    r['pseudosequence'],
-                    r['complex'],
-                    f"{r['probability']:.4f}",
-                    f"{r['ic50']:.2f}",
-                    r['affinity'],
-                    r['prediction']
-                ])
-    return pd.DataFrame(
-        rows,
-        columns=[
-            'Input Sequence', 'Processed k-mer', 'HLA Allele',
-            'Pseudosequence', 'Complex', 'Probability',
-            'IC50 (nM)', 'Affinity', 'Prediction'
-        ]
-    )
+                rows.append([raw, km, r['hla_allele'], r['pseudosequence'], r['complex'], f"{r['probability']:.4f}", f"{r['ic50']:.2f}", r['affinity'], r['prediction']])
+    return pd.DataFrame(rows, columns=['Input Sequence','Processed k-mer','HLA Allele','Pseudosequence','Complex','Probability','IC50 (nM)','Affinity','Prediction'])
 
 # ============== Streamlit UI ==============
-
 def main():
     st.set_page_config(page_title="Custommune HLA-I Epitope Binding Prediction", layout="wide")
     st.title("🧬 Custommune HLA-I Epitope Binding Prediction")
-
     try:
         model, tokenizer, hla_db = load_model_and_data()
     except Exception as e:
@@ -252,19 +206,9 @@ def main():
 
     with st.sidebar:
         st.header("Input Parameters")
-        ep_input = st.text_area(
-            "Peptide Sequence(s)",
-            help="Comma-separated epitopes, e.g. SIINFEKL, AGSIINFEKL"
-        )
-        k_length = st.number_input(
-            "k-mer Length",
-            min_value=1, max_value=15, value=9, step=1
-        )
-        alleles = st.multiselect(
-            "HLA Allele(s)",
-            options=human_alleles,
-            default=[default]
-        )
+        ep_input = st.text_area("Peptide Sequence(s)", help="Comma-separated epitopes, e.g. SIINFEKL, AGSIINFEKL")
+        k_length = st.number_input("k-mer Length", min_value=1, max_value=15, value=9, step=1)
+        alleles = st.multiselect("HLA Allele(s)", options=human_alleles, default=[default])
         if st.button("Predict Binding"):
             if not ep_input.strip():
                 st.warning("Please enter at least one peptide sequence.")
@@ -273,10 +217,9 @@ def main():
                 st.subheader("Prediction Results")
                 st.dataframe(df, use_container_width=True, height=500)
 
-    hide_style = """
+    st.markdown("""
         <style>#MainMenu{visibility:hidden;} footer{visibility:hidden;}</style>
-    """
-    st.markdown(hide_style, unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
