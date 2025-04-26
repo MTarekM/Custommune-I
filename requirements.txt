@@ -1,0 +1,6 @@
+pandas
+tensorflow==2.12.0
+tqdm
+scikit-learn
+protobuf<4.0.0  # Add this line
+h5py==3.7.0
