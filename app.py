@@ -120,11 +120,13 @@ def verify_versions():
 @st.cache_resource
 
 
+# ============== Load Model, Tokenizer, HLA DB ==============
+@st.cache_resource
 def load_model_and_data():
     verify_versions()
     verify_files()
 
-    # 1. Create complete custom objects dictionary
+    # 1. Create complete custom objects specification
     custom_objs = {
         # Custom metrics
         'F1Score': F1Score,
@@ -137,39 +139,52 @@ def load_model_and_data():
         'SafeAddLayer': SafeAddLayer,
         'Swish': Swish,
         
-        # TF internal components
+        # Essential TF components
         'MultiHeadAttention': MultiHeadAttention,
         'Attention': Attention,
-        'TFOpLambda': TFOpLambda,
+        
+        # Critical TFOpLambda handler
+        'TFOpLambda': lambda **config: TFOpLambda.from_config(config),
         
         # TF operations used in the model
         'tf.nn.silu': tf.nn.silu,
         'tf.__operators__.add': operator.add,
         
-        # Special handler for Functional API models
-        'Functional': tf.keras.Model  # Critical for Functional API models
+        # Functional API specification
+        'Functional': tf.keras.Model,
+        
+        # Add any other TF operations used in lambda layers
+        'tf': tf  # Safety blanket for any tf.* operations
     }
 
-    # 2. Global registration (just to be safe)
+    # 2. Double-registration pattern
+    # Global registration
     for name, obj in custom_objs.items():
         tf.keras.utils.get_custom_objects()[name] = obj
-
-    # 3. Load model with safety wrapper
+        
+    # Direct loading with explicit scope
     try:
-        model = tf.keras.models.load_model(
-            'best_combined_model.h5',
-            custom_objects=custom_objs,
-            compile=False  # Disable compilation if not needed
-        )
+        with tf.keras.utils.custom_object_scope(custom_objs):
+            model = tf.keras.models.load_model(
+                'best_combined_model.h5',
+                compile=False  # Disable compilation if not needed
+            )
     except Exception as e:
         st.error(f"""Model loading failed: {str(e)}
-                 Ensure:
-                 1. Model was saved with model.save() in TF 2.12+
-                 2. All custom components are properly registered
-                 3. No incompatible TF version changes""")
+                 Critical Checks:
+                 1. Model saved with model.save() in TF 2.12+
+                 2. TensorFlow version consistency (2.12.x)
+                 3. All custom components properly defined
+                 4. No incompatible architecture changes""")
         st.stop()
 
-    # Rest of loading code...
+    # 3. Validate model structure
+    try:
+        model.summary(print_fn=lambda x: st.write(x))
+    except:
+        st.warning("Couldn't display model summary, but model loaded")
+
+    # Load supporting data
     with open('tokenizer.pkl', 'rb') as f:
         tokenizer = pickle.load(f)
 
