@@ -71,7 +71,7 @@ class RobustMultiHeadAttention(MultiHeadAttention):
 # ============== Core Functions ==============
 def verify_files():
     required_files = {
-        'model': 'converted_model',
+        'model': 'best_combined_model.h5',
         'tokenizer': 'tokenizer.pkl',
         'hla_db': 'class1_pseudosequences.csv'
     }
@@ -95,7 +95,7 @@ def load_model():
     }
 
     try:
-        return tf.keras.models.load_model('converted_model', custom_objects=custom_objects)
+        return tf.keras.models.load_model('best_combined_model.h5', custom_objects=custom_objects)
     except Exception as e:
         st.error(f"""Model loading failed: {str(e)}
                   Ensure the model was saved with custom layers properly registered.""")
