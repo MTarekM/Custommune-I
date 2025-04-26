@@ -122,7 +122,22 @@ class NegativePredictiveValue(tf.keras.metrics.Metric):
 
     def get_config(self):
         return {'threshold': self.threshold}
+@register_keras_serializable(package='CustomLayers')
+class CompatibleMultiHeadAttention(MultiHeadAttention):
+    def __init__(self, **kwargs):
+        # Filter out unexpected arguments
+        kwargs.pop('query_shape', None)
+        kwargs.pop('key_shape', None)
+        kwargs.pop('value_shape', None)
+        super().__init__(**kwargs)
 
+    @classmethod
+    def from_config(cls, config):
+        # Remove shape parameters before instantiation
+        config.pop('query_shape', None)
+        config.pop('key_shape', None)
+        config.pop('value_shape', None)
+        return cls(**config)
 # ============== Utility Functions ==============
 def verify_files():
     required_files = {
@@ -155,24 +170,19 @@ def verify_versions():
 def load_model_with_custom_objects():
     # Custom objects configuration
     custom_objects = {
-        # Core custom components
+        # Replace standard MHA with compatible version
+        'MultiHeadAttention': CompatibleMultiHeadAttention,
+        
+        # Keep other custom entries
+        'SafeAddLayer': SafeAddLayer,
+        'Swish': Swish,
         'F1Score': F1Score,
         'NegativePredictiveValue': NegativePredictiveValue,
         'AdamW': AdamW,
-        'Swish': Swish,
-        
-        # TensorFlow operation mappings
-        'tf.nn.silu': Swish(),
-        'SafeAddLayer': SafeAddLayer,
+        'TFOpLambda': SafeAddLayer,
         'tf.__operators__.add': SafeAddLayer(),
-        'TFOpLambda': SafeAddLayer,  # Handle TensorFlow operation wrappers
         'operators.add': SafeAddLayer(),
-        
-        # Standard layers
-        'MultiHeadAttention': MultiHeadAttention,
         'Attention': Attention,
-        
-        # Framework reference
         'keras': tf.keras
     }
 
