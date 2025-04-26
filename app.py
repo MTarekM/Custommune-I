@@ -125,7 +125,7 @@ def predict_binding(epitope, hla_allele, model, tokenizer, hla_db, threshold=0.5
         hla_seq = hla_db.loc[hla_db[0] == hla_allele, 1].values[0]
         combined = f"{epitope}-{hla_seq}"
         proc = preprocess_sequence(combined, tokenizer)
-        prob = float(model.predict(proc, verbose=0)[0][0]
+        prob = float(model.predict(proc, verbose=0)[0][0])
         
         IC50_MIN = 0.1
         IC50_MAX = 50000.0
