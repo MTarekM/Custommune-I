@@ -1,3 +1,4 @@
+import inspect
 import json
 import h5py
 import streamlit as st
@@ -13,9 +14,11 @@ from tensorflow.keras import metrics
 from tensorflow.keras.utils import register_keras_serializable
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 import os
-import inspect  
 
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TensorFlow info messages
+# Configure environment
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TensorFlow logs
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # Disable GPU
+
 # ============== Custom Components ==============
 @register_keras_serializable(package='CustomMetrics')
 class F1Score(tf.keras.metrics.Metric):
@@ -47,7 +50,6 @@ class AdamW(tf.keras.optimizers.legacy.Adam):
         var_device, var_dtype = var.device, var.dtype.base_dtype
         coefficients = ((apply_state or {}).get((var_device, var_dtype)) 
                        or self._fallback_apply_state(var_device, var_dtype))
-        
         lr = coefficients['lr_t']
         wd = tf.cast(self.weight_decay, var_dtype)
         var.assign_sub(var * wd * lr)
@@ -59,35 +61,54 @@ class AdamW(tf.keras.optimizers.legacy.Adam):
         return config
 
 @register_keras_serializable(package='CustomLayers')
-
 class SafeAddLayer(Layer):
-    def __init__(self, **kwargs):
-        # Filter out unexpected arguments before passing to super
-        self._function = kwargs.pop('function', None)  # Capture but ignore
-        super().__init__(**kwargs)
-    
     def call(self, inputs):
-        # Maintain original functionality
         if isinstance(inputs, list):
             return tf.add(inputs[0], inputs[1])
         return tf.add(inputs, inputs)
     
     def get_config(self):
-        # Return only expected configuration
-        config = super().get_config()
-        return config
-
-    @classmethod
-    def from_config(cls, config):
-        # Filter out unexpected config entries
-        safe_keys = ['name', 'trainable', 'dtype']
-        safe_config = {k: config[k] for k in safe_keys if k in config}
-        return cls(**safe_config)
+        return super().get_config()
 
 @register_keras_serializable(package='CustomLayers')
 class Swish(Layer):
     def call(self, inputs):
         return tf.nn.silu(inputs)
+
+@register_keras_serializable(package='CustomLayers')
+class RobustMultiHeadAttention(MultiHeadAttention):
+    """Handles MHA layers with extra shape parameters"""
+    def __init__(self, **kwargs):
+        base_args = inspect.getfullargspec(super().__init__).args
+        valid_kwargs = {k: v for k, v in kwargs.items() if k in base_args}
+        self.extra_config = {k: v for k, v in kwargs.items() if k not in base_args}
+        super().__init__(**valid_kwargs)
+
+    def get_config(self):
+        config = super().get_config()
+        config.update(self.extra_config)
+        return config
+
+    @classmethod
+    def from_config(cls, config):
+        base_args = inspect.getfullargspec(super().__init__).args
+        valid_config = {k: v for k, v in config.items() if k in base_args}
+        return cls(**valid_config)
+
+@register_keras_serializable(package='CustomLayers')
+class UniversalLambda(Layer):
+    """Handles all lambda layer variants"""
+    def __init__(self, **kwargs):
+        self.function = kwargs.pop('function', None)
+        super().__init__(**kwargs)
+    
+    def call(self, inputs):
+        return inputs
+    
+    def get_config(self):
+        config = super().get_config()
+        config['function'] = self.function
+        return config
 
 @register_keras_serializable(package='CustomMetrics')
 class NegativePredictiveValue(tf.keras.metrics.Metric):
@@ -114,22 +135,7 @@ class NegativePredictiveValue(tf.keras.metrics.Metric):
 
     def get_config(self):
         return {'threshold': self.threshold}
-@register_keras_serializable(package='CustomLayers')
-class CompatibleMultiHeadAttention(MultiHeadAttention):
-    def __init__(self, **kwargs):
-        # Filter out unexpected arguments
-        kwargs.pop('query_shape', None)
-        kwargs.pop('key_shape', None)
-        kwargs.pop('value_shape', None)
-        super().__init__(**kwargs)
 
-    @classmethod
-    def from_config(cls, config):
-        # Remove shape parameters before instantiation
-        config.pop('query_shape', None)
-        config.pop('key_shape', None)
-        config.pop('value_shape', None)
-        return cls(**config)
 # ============== Utility Functions ==============
 def verify_files():
     required_files = {
@@ -137,140 +143,61 @@ def verify_files():
         'tokenizer': 'tokenizer.pkl',
         'hla_db': 'class1_pseudosequences.csv'
     }
-    
-    missing = []
-    for name, path in required_files.items():
-        if not os.path.exists(path):
-            missing.append(path)
-    
+    missing = [path for name, path in required_files.items() if not os.path.exists(path)]
     if missing:
         raise FileNotFoundError(f"Missing required files: {', '.join(missing)}")
 
 def verify_versions():
-    required = {'tensorflow': '2.19.0', 'h5py': '3.13.0'}
-    current = {
-        'tensorflow': tf.__version__,
-        'h5py': h5py.__version__
-    }
-    
+    required = {'tensorflow': '2.12.0', 'h5py': '3.7.0'}
+    current = {'tensorflow': tf.__version__, 'h5py': h5py.__version__}
     for lib, ver in required.items():
         if current[lib] != ver:
             raise EnvironmentError(f"Version mismatch for {lib}: Required {ver}, Found {current[lib]}")
 
-# ============== Enhanced Custom Layers ==============
-@register_keras_serializable(package='CustomLayers')
-class FallbackLayer(Layer):
-    """Handles unknown layer types and unexpected config parameters"""
-    def __init__(self, **kwargs):
-        self._unexpected = kwargs.pop('unexpected', {})
-        super().__init__(**kwargs)
-    
-    def call(self, inputs):
-        return inputs  # Identity operation for safety
-    
-    def get_config(self):
-        config = super().get_config()
-        config.update(self._unexpected)
-        return config
-    
-    @classmethod
-    def from_config(cls, config):
-        expected_keys = ['name', 'trainable', 'dtype']
-        safe_config = {k: config.pop(k) for k in expected_keys if k in config}
-        return cls(unexpected=config, **safe_config)
-
-@register_keras_serializable(package='CustomLayers')
-class RobustMultiHeadAttention(MultiHeadAttention):
-    """Handles MHA layers with extra shape information"""
-    def __init__(self, **kwargs):
-        # Get valid parent class parameters
-        parent_args = inspect.getfullargspec(super().__init__).args
-        parent_args.remove('self')
-        
-        # Separate valid and extra arguments
-        valid_kwargs = {k: v for k, v in kwargs.items() if k in parent_args}
-        self.extra_config = {k: v for k, v in kwargs.items() if k not in parent_args}
-        
-        super().__init__(**valid_kwargs)
-    
-    def get_config(self):
-        config = super().get_config()
-        config.update(self.extra_config)
-        return config
-    
-    @classmethod
-    def from_config(cls, config):
-        # Get parent class parameters
-        parent_args = inspect.getfullargspec(super().__init__).args
-        parent_args.remove('self')
-        
-        # Split configuration
-        parent_config = {k: v for k, v in config.items() if k in parent_args}
-        extra_config = {k: v for k, v in config.items() if k not in parent_args}
-        
-        instance = cls(**parent_config)
-        instance.extra_config = extra_config
-        return instance
-
-# ============== Updated Model Loading ==============
+@st.cache_resource
 def load_model_with_custom_objects():
-    # Comprehensive custom objects mapping
     custom_objects = {
-        # Core components
         'F1Score': F1Score,
         'NegativePredictiveValue': NegativePredictiveValue,
         'AdamW': AdamW,
         'SafeAddLayer': SafeAddLayer,
         'Swish': Swish,
-        
-        # Enhanced layer handlers
+        'RobustMultiHeadAttention': RobustMultiHeadAttention,
         'MultiHeadAttention': RobustMultiHeadAttention,
-        'Attention': Attention,
-        'FallbackLayer': FallbackLayer,
-        
-        # TensorFlow operation mappings
+        'UniversalLambda': UniversalLambda,
+        'TFOpLambda': UniversalLambda,
+        'Lambda': UniversalLambda,
         'tf.nn.silu': Swish(),
         'tf.__operators__.add': SafeAddLayer(),
-        'TFOpLambda': FallbackLayer,
-        'Lambda': FallbackLayer,
         'operators.add': SafeAddLayer(),
-        'keras': tf.keras,
-        
-        # Legacy format support
-        'function': FallbackLayer,
-        'SymbolicException': FallbackLayer,
+        'Attention': Attention,
+        'keras': tf.keras
     }
 
-    # Configure environment for stable loading
     tf.keras.config.enable_unsafe_deserialization = True
-    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Reduce TF logging
     
     try:
-        # Attempt standard load
-        model = tf.keras.models.load_model(
-            'best_combined_model.h5',
-            custom_objects=custom_objects
-        )
+        model = tf.keras.models.load_model('best_combined_model.h5', custom_objects=custom_objects)
     except Exception as e:
-        # Fallback strategy for legacy models
         try:
             with h5py.File('best_combined_model.h5', 'r') as f:
                 model = model_from_json(
-                    f.attrs['model_config'],
+                    json.dumps(json.loads(f.attrs['model_config']),
                     custom_objects=custom_objects
                 )
                 model.load_weights(f['model_weights'])
-        except Exception as inner_e:
-            raise RuntimeError(f"Model loading failed: {str(inner_e)}") from inner_e
+        except Exception as fallback_error:
+            raise RuntimeError(f"Model loading failed: {str(fallback_error)}") from fallback_error
 
-    # Verification with actual input shape
+    # Model verification
     try:
-        sample_input = np.random.rand(1, 50).astype(np.float32)
-        _ = model.predict(sample_input, verbose=0)
+        dummy_input = np.zeros((1, 50))
+        model.predict(dummy_input, verbose=0)
     except Exception as e:
         raise RuntimeError("Model verification failed") from e
     
     return model
+
 @st.cache_data
 def load_tokenizer():
     with open('tokenizer.pkl', 'rb') as f:
@@ -294,7 +221,7 @@ def predict_binding(epitope, hla_allele, model, tokenizer, hla_db, threshold=0.5
         hla_seq = hla_db.loc[hla_db[0] == hla_allele, 1].values[0]
         combined = f"{epitope}-{hla_seq}"
         proc = preprocess_sequence(combined, tokenizer)
-        prob = float(model.predict(proc, verbose=0)[0][0])
+        prob = float(model.predict(proc, verbose=0)[0][0]
         
         IC50_MIN = 0.1
         IC50_MAX = 50000.0
@@ -305,14 +232,10 @@ def predict_binding(epitope, hla_allele, model, tokenizer, hla_db, threshold=0.5
         else:
             ic50 = IC50_MAX + (IC50_CUTOFF - IC50_MAX) * ((threshold - prob)/threshold)
 
-        if ic50 < 50:
-            affinity = "High"
-        elif ic50 < 500:
-            affinity = "Intermediate"
-        elif ic50 < 5000:
-            affinity = "Low"
-        else:
-            affinity = "Non-Binder"
+        affinity = "High" if ic50 < 50 else \
+                 "Intermediate" if ic50 < 500 else \
+                 "Low" if ic50 < 5000 else \
+                 "Non-Binder"
 
         return {
             'epitope': epitope,
@@ -348,9 +271,7 @@ def main():
     st.title("Custommune HLA-I Epitope Binding Prediction")
     
     try:
-        # Enable unsafe deserialization first
         tf.keras.config.enable_unsafe_deserialization = True
-        
         verify_files()
         verify_versions()
         model = load_model_with_custom_objects()
@@ -453,12 +374,8 @@ def main():
                     use_container_width=True,
                     height=600,
                     column_config={
-                        "IC50 (nM)": st.column_config.NumberColumn(
-                            format="%.2f nM",
-                        ),
-                        "Probability": st.column_config.NumberColumn(
-                            format="%.4f",
-                        )
+                        "IC50 (nM)": st.column_config.NumberColumn(format="%.2f nM"),
+                        "Probability": st.column_config.NumberColumn(format="%.4f")
                     }
                 )
                 
