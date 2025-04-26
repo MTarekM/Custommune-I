@@ -137,36 +137,41 @@ def verify_versions():
 
 @st.cache_resource
 
-@st.cache_resource
 def load_model_with_custom_objects():
     # Custom objects configuration
-    # Update the custom_objects definition in load_model_with_custom_objects()
     custom_objects = {
-            # Existing custom objects
-            'F1Score': F1Score,
-            'NegativePredictiveValue': NegativePredictiveValue,  # Add this line
-            'AdamW': AdamW,
-            'SafeAddLayer': SafeAddLayer,
-            'Swish': Swish,
-            # Keep existing TF components
-            'MultiHeadAttention': MultiHeadAttention,
-            'Attention': Attention,
-            'tf.nn.silu': Swish(),
-            'tf.__operators__.add': SafeAddLayer(),
-        }
+        # Core custom components
+        'F1Score': F1Score,
+        'NegativePredictiveValue': NegativePredictiveValue,
+        'AdamW': AdamW,
+        'SafeAddLayer': SafeAddLayer,
+        'Swish': Swish,
+        
+        # TensorFlow operation mappings
+        'tf.nn.silu': Swish(),
+        'tf.__operators__.add': SafeAddLayer(),
+        'TFOpLambda': SafeAddLayer,  # Critical fix for missing layer
+        
+        # Standard layers
+        'MultiHeadAttention': MultiHeadAttention,
+        'Attention': Attention,
+        
+        # Framework reference
+        'keras': tf.keras
+    }
 
-    # Enable legacy model loading
+    # Enable legacy loading
     tf.keras.config.enable_unsafe_deserialization = True
     
-    # Load model with custom objects
+    # Load model
     model = tf.keras.models.load_model(
         'best_combined_model.h5',
         custom_objects=custom_objects
     )
     
-    # Verify model functionality
+    # Verification remains the same
     try:
-        dummy_input = np.zeros((1, 50))  # Match your model's input shape
+        dummy_input = np.zeros((1, 50))
         model.predict(dummy_input)
     except Exception as e:
         raise RuntimeError("Model verification failed") from e
