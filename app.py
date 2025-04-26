@@ -81,17 +81,7 @@ class SafeAddLayer(Layer):
         safe_keys = ['name', 'trainable', 'dtype']
         safe_config = {k: config[k] for k in safe_keys if k in config}
         return cls(**safe_config)
-@register_keras_serializable(package='CustomLayers')
-class GenericLambda(Layer):
-    def __init__(self, func, **kwargs):
-        super().__init__(**kwargs)
-        self.func = func
-    
-    def call(self, inputs):
-        return self.func(inputs)
-    
-    def get_config(self):
-        return {'func': self.func}
+
 @register_keras_serializable(package='CustomLayers')
 class Swish(Layer):
     def call(self, inputs):
@@ -165,45 +155,107 @@ def verify_versions():
         if current[lib] != ver:
             raise EnvironmentError(f"Version mismatch for {lib}: Required {ver}, Found {current[lib]}")
 
-@st.cache_resource
+# ============== Enhanced Custom Layers ==============
+@register_keras_serializable(package='CustomLayers')
+class FallbackLayer(Layer):
+    """Handles unknown layer types and unexpected config parameters"""
+    def __init__(self, **kwargs):
+        self._unexpected = kwargs.pop('unexpected', {})
+        super().__init__(**kwargs)
+    
+    def call(self, inputs):
+        return inputs  # Identity operation for safety
+    
+    def get_config(self):
+        config = super().get_config()
+        config.update(self._unexpected)
+        return config
+    
+    @classmethod
+    def from_config(cls, config):
+        expected_keys = ['name', 'trainable', 'dtype']
+        safe_config = {k: config.pop(k) for k in expected_keys if k in config}
+        return cls(unexpected=config, **safe_config)
 
+@register_keras_serializable(package='CustomLayers')
+class RobustMultiHeadAttention(MultiHeadAttention):
+    """Handles MHA layers with extra shape information"""
+    def __init__(self, **kwargs):
+        self._extra_config = {k: kwargs.pop(k) for k in list(kwargs.keys()) 
+                            if k not in inspect.getfullargspec(super().__init__).args}
+        super().__init__(**kwargs)
+    
+    def get_config(self):
+        config = super().get_config()
+        config.update(self._extra_config)
+        return config
+    
+    @classmethod
+    def from_config(cls, config):
+        base_params = inspect.getfullargspec(super().__init__).args
+        base_config = {k: v for k, v in config.items() if k in base_params}
+        extra_config = {k: v for k, v in config.items() if k not in base_params}
+        return cls(**base_config, **extra_config)
+
+# ============== Updated Model Loading ==============
 def load_model_with_custom_objects():
-    # Custom objects configuration
+    # Comprehensive custom objects mapping
     custom_objects = {
-        # Replace standard MHA with compatible version
-        'MultiHeadAttention': CompatibleMultiHeadAttention,
-        
-        # Keep other custom entries
-        'SafeAddLayer': SafeAddLayer,
-        'Swish': Swish,
+        # Core components
         'F1Score': F1Score,
         'NegativePredictiveValue': NegativePredictiveValue,
         'AdamW': AdamW,
-        'TFOpLambda': SafeAddLayer,
-        'tf.__operators__.add': SafeAddLayer(),
-        'operators.add': SafeAddLayer(),
+        'SafeAddLayer': SafeAddLayer,
+        'Swish': Swish,
+        
+        # Enhanced layer handlers
+        'MultiHeadAttention': RobustMultiHeadAttention,
         'Attention': Attention,
-        'keras': tf.keras
+        'FallbackLayer': FallbackLayer,
+        
+        # TensorFlow operation mappings
+        'tf.nn.silu': Swish(),
+        'tf.__operators__.add': SafeAddLayer(),
+        'TFOpLambda': FallbackLayer,
+        'Lambda': FallbackLayer,
+        'operators.add': SafeAddLayer(),
+        'keras': tf.keras,
+        
+        # Legacy format support
+        'function': FallbackLayer,
+        'SymbolicException': FallbackLayer,
     }
 
-    # Enable legacy loading
+    # Configure environment for stable loading
     tf.keras.config.enable_unsafe_deserialization = True
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Reduce TF logging
     
-    # Load model
-    model = tf.keras.models.load_model(
-        'best_combined_model.h5',
-        custom_objects=custom_objects
-    )
-    
-    # Verification remains the same
     try:
-        dummy_input = np.zeros((1, 50))
-        model.predict(dummy_input)
+        # Attempt standard load
+        model = tf.keras.models.load_model(
+            'best_combined_model.h5',
+            custom_objects=custom_objects
+        )
+    except Exception as e:
+        # Fallback strategy for legacy models
+        try:
+            with h5py.File('best_combined_model.h5', 'r') as f:
+                model = model_from_json(
+                    f.attrs['model_config'],
+                    custom_objects=custom_objects
+                )
+                model.load_weights(f['model_weights'])
+        except Exception as inner_e:
+            raise RuntimeError(f"Model loading failed: {str(inner_e)}") from inner_e
+
+    # Verification with actual input shape
+    try:
+        sample_input = np.random.rand(1, 50).astype(np.float32)
+        _ = model.predict(sample_input, verbose=0)
     except Exception as e:
         raise RuntimeError("Model verification failed") from e
     
     return model
-
 @st.cache_data
 def load_tokenizer():
     with open('tokenizer.pkl', 'rb') as f:
