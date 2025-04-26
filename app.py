@@ -137,6 +137,7 @@ def verify_versions():
 
 @st.cache_resource
 
+@st.cache_resource
 def load_model_with_custom_objects():
     # Custom objects configuration
     custom_objects = {
@@ -148,12 +149,13 @@ def load_model_with_custom_objects():
         'Swish': Swish,
         'MultiHeadAttention': MultiHeadAttention,
         'Attention': Attention,
+        'GenericLambda': GenericLambda,
         
         # Handle TensorFlow internal operations
         'TFOpLambda': tf.keras.layers.Lambda,
         'tf.__operators__.add': SafeAddLayer(),
         'add': SafeAddLayer(),
-        '<lambda>': SafeAddLayer(),
+        '<lambda>': GenericLambda(lambda x: x),
         
         # Framework reference
         'keras': tf.keras
@@ -165,8 +167,7 @@ def load_model_with_custom_objects():
     # Load model with custom objects
     model = tf.keras.models.load_model(
         'best_combined_model.h5',
-        custom_objects=custom_objects,
-        custom_objects['GenericLambda'] = GenericLambda
+        custom_objects=custom_objects
     )
     
     # Verify model functionality
