@@ -144,7 +144,7 @@ def load_model_and_data():
         'Attention': Attention,
         
         # Critical TFOpLambda handler
-        'TFOpLambda': lambda **config: TFOpLambda.from_config(config),
+        'TFOpLambda': TFOpLambda,#'TFOpLambda': lambda **config: TFOpLambda.from_config(config),
         
         # TF operations used in the model
         'tf.nn.silu': tf.nn.silu,
