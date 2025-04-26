@@ -13,6 +13,8 @@ from tensorflow.keras import metrics
 from tensorflow.keras.utils import register_keras_serializable
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 import os
+import inspect  
+
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TensorFlow info messages
 # ============== Custom Components ==============
 @register_keras_serializable(package='CustomMetrics')
@@ -181,21 +183,34 @@ class FallbackLayer(Layer):
 class RobustMultiHeadAttention(MultiHeadAttention):
     """Handles MHA layers with extra shape information"""
     def __init__(self, **kwargs):
-        self._extra_config = {k: kwargs.pop(k) for k in list(kwargs.keys()) 
-                            if k not in inspect.getfullargspec(super().__init__).args}
-        super().__init__(**kwargs)
+        # Get valid parent class parameters
+        parent_args = inspect.getfullargspec(super().__init__).args
+        parent_args.remove('self')
+        
+        # Separate valid and extra arguments
+        valid_kwargs = {k: v for k, v in kwargs.items() if k in parent_args}
+        self.extra_config = {k: v for k, v in kwargs.items() if k not in parent_args}
+        
+        super().__init__(**valid_kwargs)
     
     def get_config(self):
         config = super().get_config()
-        config.update(self._extra_config)
+        config.update(self.extra_config)
         return config
     
     @classmethod
     def from_config(cls, config):
-        base_params = inspect.getfullargspec(super().__init__).args
-        base_config = {k: v for k, v in config.items() if k in base_params}
-        extra_config = {k: v for k, v in config.items() if k not in base_params}
-        return cls(**base_config, **extra_config)
+        # Get parent class parameters
+        parent_args = inspect.getfullargspec(super().__init__).args
+        parent_args.remove('self')
+        
+        # Split configuration
+        parent_config = {k: v for k, v in config.items() if k in parent_args}
+        extra_config = {k: v for k, v in config.items() if k not in parent_args}
+        
+        instance = cls(**parent_config)
+        instance.extra_config = extra_config
+        return instance
 
 # ============== Updated Model Loading ==============
 def load_model_with_custom_objects():
