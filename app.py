@@ -109,7 +109,8 @@ def verify_files():
         raise FileNotFoundError(f"Missing required files: {', '.join(missing)}")
 
 def verify_versions():
-    required = {'tensorflow': '2.12.0', 'h5py': '3.7.0'}
+    required = {'tensorflow': '2.19.0', 'h5py': '3.11.0'}  # Match your requirements.txt
+    
     current = {
         'tensorflow': tf.__version__,
         'h5py': h5py.__version__
@@ -205,6 +206,7 @@ def predict_binding(epitope, hla_allele, model, tokenizer, hla_db, threshold=0.5
 
 # ============== Streamlit UI ==============
 def main():
+    tf.keras.config.enable_unsafe_deserialization = True  # Needed for older model formats
     st.set_page_config(
         page_title="Custommune HLA Predictor",
         page_icon="🧬",
