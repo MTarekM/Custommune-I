@@ -20,7 +20,7 @@ from tensorflow.python.keras.layers.core import TFOpLambda
 # ─── Register internal ops and layers ─────────────────────────────────────────
 # Ensure TFOpLambda and wrapped ops are known globally
 tf.keras.utils.get_custom_objects()['TFOpLambda'] = TFOpLambda
- tf.keras.utils.get_custom_objects()['tf.nn.silu'] = tf.nn.silu
+tf.keras.utils.get_custom_objects()['tf.nn.silu'] = tf.nn.silu
 tf.keras.utils.get_custom_objects()['tf.__operators__.add'] = operator.add
 
 # ============== Unified Custom Components ==============
