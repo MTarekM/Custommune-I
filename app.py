@@ -146,6 +146,23 @@ def load_model_and_data():
         custom_objects=custom_objs,
         compile=False     # safe when you only need predict()
     )
+    +    # ── WORKAROUND FOR TFOpLambda DESERIALIZATION ERRORS ───────────
++    import h5py
++    from tensorflow.keras.models import model_from_json
++
++    # 1) Read the JSON graph out of the H5 attrs
++    with h5py.File('best_combined_model.h5', 'r') as f:
++        raw = f.attrs.get('model_config')
++    # If it comes back as bytes, decode it
++    model_json = raw.decode('utf-8') if isinstance(raw, (bytes, bytearray)) else raw
++
++    # 2) Rebuild architecture with your custom layers/metrics
++    model = model_from_json(model_json, custom_objects=custom_objs)
++
++    # 3) Load the weights from the same H5
++    model.load_weights('best_combined_model.h5')
++    # ────────────────────────────────────────────────────────────────
+
 
     # … load tokenizer, hla_db, etc …
     return model, tokenizer, hla_db
