@@ -80,15 +80,16 @@ def verify_files():
         raise FileNotFoundError(f"Missing required files: {', '.join(missing)}")
 
 @st.cache_resource
+
 def load_model():
     custom_objects = {
-        'F1Score': F1Score,
-        'SafeAddLayer': SafeAddLayer,
-        'Swish': Swish,
-        'RobustMultiHeadAttention': RobustMultiHeadAttention,
+        'CustomMetrics>F1Score': F1Score,
+        'CustomLayers>SafeAddLayer': SafeAddLayer,
+        'CustomLayers>Swish': Swish,
+        'CustomLayers>RobustMultiHeadAttention': RobustMultiHeadAttention,
+        # If the model originally used MultiHeadAttention but was replaced, include:
         'MultiHeadAttention': RobustMultiHeadAttention,
-        'tf.nn.silu': Swish(),
-        'tf.__operators__.add': SafeAddLayer(),
+        # Handle TensorFlow operation layers if necessary
         'TFOpLambda': SafeAddLayer,
         'keras': tf.keras
     }
@@ -97,8 +98,7 @@ def load_model():
         return tf.keras.models.load_model('converted_model', custom_objects=custom_objects)
     except Exception as e:
         st.error(f"""Model loading failed: {str(e)}
-                  Ensure you've converted the model using:
-                  model.save('converted_model', save_format='tf')""")
+                  Ensure the model was saved with custom layers properly registered.""")
         st.stop()
 
 @st.cache_data
