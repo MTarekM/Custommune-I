@@ -167,7 +167,7 @@ def load_model_and_data():
                 custom_objects={
                 'TFOpLambda': TFOpLambda,
                 'tf.nn.silu': tf.nn.silu,
-                'tf.__operators__.add': operator.add,]
+                'tf.__operators__.add': operator.add,}
 
             )
             
