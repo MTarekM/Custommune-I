@@ -122,52 +122,63 @@ def verify_versions():
 
 # ============== Load Model, Tokenizer, HLA DB ==============
 @st.cache_resource
+# ============== Load Model, Tokenizer, HLA DB ==============
+@st.cache_resource
 def load_model_and_data():
-    verify_versions()
-    verify_files()
+    verify_versions()  # Ensure TF 2.12+ and h5py 3.7+
+    verify_files()     # Check for required files
 
-    # 1. Create complete custom objects specification
-    custom_objs = {
+    # 1. Comprehensive custom object registration
+    custom_objects = {
+        # Core components
+        'Functional': tf.keras.Model,
+        'TFOpLambda': TFOpLambda,
+        
+        # Custom components
         'F1Score': F1Score,
         'NegativePredictiveValue': NegativePredictiveValue,
         'AdamW': AdamW,
         'SafeAddLayer': SafeAddLayer,
         'Swish': Swish,
-        'MultiHeadAttention': MultiHeadAttention,
-        'Attention': Attention,
-        'TFOpLambda': TFOpLambda,  # <-- NOT lambda function, real class
+        
+        # TensorFlow operations
         'tf.nn.silu': tf.nn.silu,
         'tf.__operators__.add': operator.add,
-        'Functional': tf.keras.Model,
-        'tf': tf  # optional safety net
+        'tf': tf  # Wildcard for any tf.* operations
     }
 
-    # 2. Double-registration pattern
+    # 2. Dual registration strategy
     # Global registration
-    for name, obj in custom_objs.items():
+    for name, obj in custom_objects.items():
         tf.keras.utils.get_custom_objects()[name] = obj
         
-    # Direct loading with explicit scope
-    try:
-        with tf.keras.utils.custom_object_scope(custom_objs):
+    # Local scope registration
+    with tf.keras.utils.custom_object_scope(custom_objects):
+        try:
+            # 3. Load model with architecture validation
             model = tf.keras.models.load_model(
                 'best_combined_model.h5',
-                compile=False  # Disable compilation if not needed
+                compile=False
             )
-    except Exception as e:
-        st.error(f"""Model loading failed: {str(e)}
-                 Critical Checks:
-                 1. Model saved with model.save() in TF 2.12+
-                 2. TensorFlow version consistency (2.12.x)
-                 3. All custom components properly defined
-                 4. No incompatible architecture changes""")
-        st.stop()
-
-    # 3. Validate model structure
-    try:
-        model.summary(print_fn=lambda x: st.write(x))
-    except:
-        st.warning("Couldn't display model summary, but model loaded")
+            
+            # 4. Verify layer integrity
+            problematic_layers = [
+                layer for layer in model.layers 
+                if isinstance(layer, TFOpLambda)
+            ]
+            
+            if problematic_layers:
+                st.error(f"Found {len(problematic_layers)} unregistered lambda layers")
+                st.stop()
+                
+        except Exception as e:
+            st.error(f"""Model loading failed: {str(e)}
+                     Final Verification Checklist:
+                     1. Model saved with model.save() in TF 2.12+
+                     2. No lambda layers requiring special handling
+                     3. TensorFlow version match (2.12.x)
+                     4. All custom classes match original implementation""")
+            st.stop()
 
     # Load supporting data
     with open('tokenizer.pkl', 'rb') as f:
@@ -178,7 +189,6 @@ def load_model_and_data():
     hla_db = hla_db[~hla_db[0].str.contains(pattern, case=False, regex=True)]
 
     return model, tokenizer, hla_db
-
 
 # ============== Preprocessing & Prediction ==============
 def preprocess_sequence(seq, tokenizer, max_length=50):
