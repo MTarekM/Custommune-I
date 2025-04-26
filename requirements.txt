@@ -1,6 +1,6 @@
-tensorflow
+tensorflow>=2.19.0
+h5py>=3.11.0
 pandas>=2.0.3
-h5py>=3.10.0
 tqdm
 scikit-learn
 protobuf<4.0.0  # Add this line
