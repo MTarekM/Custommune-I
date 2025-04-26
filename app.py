@@ -142,26 +142,18 @@ def load_model_with_custom_objects():
     # Custom objects configuration
     # Update the custom_objects definition in load_model_with_custom_objects()
     custom_objects = {
-        # Original custom components
-        'F1Score': F1Score,
-        'NegativePredictiveValue': NegativePredictiveValue,
-        'AdamW': AdamW,
-        'SafeAddLayer': SafeAddLayer,
-        'Swish': Swish,
-        'MultiHeadAttention': MultiHeadAttention,
-        'Attention': Attention,
-    
-        # Key fix: Map TFOpLambda to a compatible implementation
-        'TFOpLambda': SafeAddLayer,  # Handles TensorFlow operation wrappers
-        
-        # Operation type mappings
-        'tf.__operators__.add': SafeAddLayer(),
-        'add': SafeAddLayer(),
-        '<lambda>': tf.keras.layers.Lambda(lambda x: x),
-    
-        # Framework reference
-        'keras': tf.keras
-    }
+            # Existing custom objects
+            'F1Score': F1Score,
+            'NegativePredictiveValue': NegativePredictiveValue,  # Add this line
+            'AdamW': AdamW,
+            'SafeAddLayer': SafeAddLayer,
+            'Swish': Swish,
+            # Keep existing TF components
+            'MultiHeadAttention': MultiHeadAttention,
+            'Attention': Attention,
+            'tf.nn.silu': Swish(),
+            'tf.__operators__.add': SafeAddLayer(),
+        }
 
     # Enable legacy model loading
     tf.keras.config.enable_unsafe_deserialization = True
