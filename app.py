@@ -2,6 +2,7 @@ import os
 import sys
 import traceback
 import pickle
+import operator
 
 import streamlit as st
 import pandas as pd
@@ -12,14 +13,12 @@ from tensorflow.keras import metrics
 from tensorflow.keras.layers import Layer, MultiHeadAttention, Attention
 from tensorflow.keras.utils import register_keras_serializable
 from tensorflow.keras.preprocessing.sequence import pad_sequences
-import operator
-import tensorflow as tf
+from tensorflow.keras.models import model_from_json
 from tensorflow.python.keras.layers.core import TFOpLambda
 
-# ─── Register TFOpLambda itself ───────────────────────────────────────────────
+# ─── Register internal ops and layers ─────────────────────────────────────────
 tf.keras.utils.get_custom_objects()['TFOpLambda'] = TFOpLambda
-
-tf.keras.utils.get_custom_objects()['tf.nn.silu'] = tf.nn.silu
+ tf.keras.utils.get_custom_objects()['tf.nn.silu'] = tf.nn.silu
 tf.keras.utils.get_custom_objects()['tf.__operators__.add'] = operator.add
 
 # ============== Unified Custom Components ==============
@@ -99,38 +98,30 @@ class Swish(Layer):
     def call(self, inputs):
         return tf.nn.silu(inputs)
 
-# ============== File Verification ==============
+# ============== File & Version Verification ==============
 def verify_files():
-    required_files = {
-        'model': 'best_combined_model.h5',
-        'tokenizer': 'tokenizer.pkl',
-        'hla_db': 'class1_pseudosequences.csv'
-    }
-    missing = [p for p in required_files.values() if not os.path.exists(p)]
+    required = ['best_combined_model.h5', 'tokenizer.pkl', 'class1_pseudosequences.csv']
+    missing = [f for f in required if not os.path.exists(f)]
     if missing:
         raise FileNotFoundError(f"Missing required files: {', '.join(missing)}")
 
-# ============== Version Verification (minimum only) ==============
 def verify_versions():
-    required_min = {'tensorflow': '2.12.0', 'h5py': '3.7.0'}
-    current = {'tensorflow': tf.__version__, 'h5py': h5py.__version__}
-    too_low = []
-    for lib, min_ver in required_min.items():
-        if parse_version(current[lib]) < parse_version(min_ver):
-            too_low.append(f"{lib} {current[lib]} < required {min_ver}")
+    req_min = {'tensorflow': '2.12.0', 'h5py': '3.7.0'}
+    curr = {'tensorflow': tf.__version__, 'h5py': h5py.__version__}
+    too_low = [f"{lib} {curr[lib]} < required {vr}" for lib, vr in req_min.items()
+               if parse_version(curr[lib]) < parse_version(vr)]
     if too_low:
         raise EnvironmentError("Version mismatch: " + "; ".join(too_low))
     else:
-        print(f"✅ Versions OK: TensorFlow {current['tensorflow']}, h5py {current['h5py']}")
+        print(f"✅ Versions OK: TF {curr['tensorflow']}, h5py {curr['h5py']}")
 
-# ============== Load Resources (cached) ==============
-@st.cache_resource
+# ============== Load Model, Tokenizer, HLA DB ==============
 @st.cache_resource
 def load_model_and_data():
     verify_versions()
     verify_files()
 
-    # you no longer need to include TFOpLambda or the ops here
+    # Custom objs for reconstruction
     custom_objs = {
         'F1Score': F1Score,
         'NegativePredictiveValue': NegativePredictiveValue,
@@ -138,136 +129,82 @@ def load_model_and_data():
         'SafeAddLayer': SafeAddLayer,
         'Swish': Swish,
         'MultiHeadAttention': MultiHeadAttention,
-        'Attention': Attention,
-        # tf.nn.silu and tf.__operators__.add are already in get_custom_objects()
+        'Attention': Attention
     }
-    model = tf.keras.models.load_model(
-        'best_combined_model.h5',
-        custom_objects=custom_objs,
-        compile=False     # safe when you only need predict()
-    )
-    +    # ── WORKAROUND FOR TFOpLambda DESERIALIZATION ERRORS ───────────
-+    import h5py
-+    from tensorflow.keras.models import model_from_json
-+
-+    # 1) Read the JSON graph out of the H5 attrs
-+    with h5py.File('best_combined_model.h5', 'r') as f:
-+        raw = f.attrs.get('model_config')
-+    # If it comes back as bytes, decode it
-+    model_json = raw.decode('utf-8') if isinstance(raw, (bytes, bytearray)) else raw
-+
-+    # 2) Rebuild architecture with your custom layers/metrics
-+    model = model_from_json(model_json, custom_objects=custom_objs)
-+
-+    # 3) Load the weights from the same H5
-+    model.load_weights('best_combined_model.h5')
-+    # ────────────────────────────────────────────────────────────────
+    # Workaround: load from JSON + weights
+    with h5py.File('best_combined_model.h5', 'r') as f:
+        raw = f.attrs.get('model_config')
+    model_json = raw.decode('utf-8') if isinstance(raw, (bytes, bytearray)) else raw
+    model = model_from_json(model_json, custom_objects=custom_objs)
+    model.load_weights('best_combined_model.h5')
 
+    with open('tokenizer.pkl', 'rb') as f:
+        tokenizer = pickle.load(f)
 
-    # … load tokenizer, hla_db, etc …
+    hla_db = pd.read_csv('class1_pseudosequences.csv', header=None)
+    pattern = r'^BoLA|^Mamu|^Patr|^SLA|^Chi|^DLA|^Eqca|^H-2|^Gogo|^H2'
+    hla_db = hla_db[~hla_db[0].str.contains(pattern, case=False, regex=True)]
+
     return model, tokenizer, hla_db
 
-
-
 # ============== Preprocessing & Prediction ==============
+def preprocess_sequence(seq, tokenizer, max_length=50):
+    enc = tokenizer.texts_to_sequences([seq])
+    return pad_sequences(enc, maxlen=max_length, padding='post')
 
-def preprocess_sequence(sequence, tokenizer, max_length=50):
-    seq_encoded = tokenizer.texts_to_sequences([sequence])
-    return pad_sequences(seq_encoded, maxlen=max_length, padding='post')
+def generate_kmers(seq, k=9):
+    return [seq[i:i+k] for i in range(len(seq)-k+1)] if len(seq) >= k else [seq]
 
-
-def generate_kmers(sequence, k=9):
-    return [sequence[i:i+k] for i in range(len(sequence)-k+1)] if len(sequence) >= k else [sequence]
-
-
-def predict_binding(epitope, hla_allele, model, tokenizer, hla_db, threshold=0.5):
+def predict_binding(epitope, allele, model, tokenizer, hla_db, threshold=0.5):
     try:
-        hla_seq = hla_db.loc[hla_db[0] == hla_allele, 1].values[0]
-        combined = f"{epitope}-{hla_seq}"
-        proc = preprocess_sequence(combined, tokenizer)
+        hla_seq = hla_db.loc[hla_db[0]==allele, 1].values[0]
+        combo = f"{epitope}-{hla_seq}"
+        proc = preprocess_sequence(combo, tokenizer)
         prob = float(model.predict(proc, verbose=0)[0][0])
-
-        IC50_MIN = 0.1
-        IC50_MAX = 50000.0
-        IC50_CUTOFF = 5000.0
+        IC50_MIN, IC50_MAX, IC50_CUTOFF = 0.1, 50000.0, 5000.0
         if prob >= threshold:
-            ic50 = IC50_MIN * (IC50_MAX/IC50_MIN) ** ((1 - prob)/(1 - threshold))
+            ic50 = IC50_MIN * (IC50_MAX/IC50_MIN)**((1-prob)/(1-threshold))
         else:
-            ic50 = IC50_MAX + (IC50_CUTOFF - IC50_MAX) * ((threshold - prob)/threshold)
-
+            ic50 = IC50_MAX + (IC50_CUTOFF-IC50_MAX)*((threshold-prob)/threshold)
         if ic50 < 50:
-            affinity = "High"
+            aff = "High"
         elif ic50 < 500:
-            affinity = "Intermediate"
+            aff = "Intermediate"
         elif ic50 < 5000:
-            affinity = "Low"
+            aff = "Low"
         else:
-            affinity = "Non-Binder"
-
-        return {
-            'epitope': epitope,
-            'hla_allele': hla_allele,
-            'pseudosequence': hla_seq,
-            'complex': combined,
-            'probability': prob,
-            'ic50': ic50,
-            'affinity': affinity,
-            'prediction': 'Binder' if prob >= threshold else 'Non-Binder'
-        }
+            aff = "Non-Binder"
+        return dict(epitope=epitope, hla_allele=allele, pseudosequence=hla_seq,
+                    complex=combo, probability=prob, ic50=ic50,
+                    affinity=aff, prediction='Binder' if prob>=threshold else 'Non-Binder')
     except Exception as e:
-        return {
-            'epitope': epitope,
-            'hla_allele': hla_allele,
-            'pseudosequence': 'N/A',
-            'complex': 'N/A',
-            'probability': 0.0,
-            'ic50': 0.0,
-            'affinity': 'Error',
-            'prediction': f'Error: {str(e)}'
-        }
-
+        return dict(epitope=epitope, hla_allele=allele, pseudosequence='N/A',
+                    complex='N/A', probability=0.0, ic50=0.0,
+                    affinity='Error', prediction=f'Error: {e}')
 
 def predict_wrapper(ep_input, alleles, k_length, model, tokenizer, hla_db):
     eps = [e.strip() for e in ep_input.split(',') if e.strip()]
     rows = []
-    for raw_ep in eps:
-        kmers = generate_kmers(raw_ep, k=k_length)
+    for raw in eps:
+        kmers = generate_kmers(raw, k=k_length)
         if not kmers:
-            rows.append([
-                raw_ep, 'N/A', 'N/A', 'N/A', 'N/A',
-                0.0, 'Error', 'Invalid (length < k)'
-            ])
+            rows.append([raw, 'N/A'] + ['N/A']*5 + ['Error','Invalid (length<k)'])
             continue
-        for ep in kmers:
-            for allele in alleles:
-                r = predict_binding(ep, allele, model, tokenizer, hla_db)
-                rows.append([
-                    raw_ep,
-                    ep,
-                    r['hla_allele'],
-                    r['pseudosequence'],
-                    r['complex'],
-                    f"{r['probability']:.4f}",
-                    f"{r['ic50']:.2f}",
-                    r['affinity'],
-                    r['prediction']
-                ])
-    return pd.DataFrame(
-        rows,
-        columns=[
-            'Input Sequence', 'Processed k-mer', 'HLA Allele',
-            'Pseudosequence', 'Complex', 'Probability',
-            'IC50 (nM)', 'Affinity', 'Prediction'
-        ]
-    )
-
+        for km in kmers:
+            for al in alleles:
+                r = predict_binding(km, al, model, tokenizer, hla_db)
+                rows.append([raw, km, r['hla_allele'], r['pseudosequence'],
+                             r['complex'], f"{r['probability']:.4f}",
+                             f"{r['ic50']:.2f}", r['affinity'], r['prediction']])
+    return pd.DataFrame(rows, columns=[
+        'Input Sequence','Processed k-mer','HLA Allele','Pseudosequence',
+        'Complex','Probability','IC50 (nM)','Affinity','Prediction'
+    ])
 
 # ============== Streamlit UI ==============
-
 def main():
     st.set_page_config(page_title="Custommune HLA-I Epitope Binding Prediction", layout="wide")
     st.title("🧬 Custommune HLA-I Epitope Binding Prediction")
-
     try:
         model, tokenizer, hla_db = load_model_and_data()
     except Exception as e:
@@ -275,25 +212,13 @@ def main():
         st.stop()
 
     human_alleles = sorted(hla_db[0].tolist())
-    default = 'HLA-A01:01'
-    if default not in human_alleles:
-        default = human_alleles[0]
+    default = 'HLA-A01:01' if 'HLA-A01:01' in human_alleles else human_alleles[0]
 
     with st.sidebar:
         st.header("Input Parameters")
-        ep_input = st.text_area(
-            "Peptide Sequence(s)",
-            help="Comma-separated epitopes, e.g. SIINFEKL, AGSIINFEKL"
-        )
-        k_length = st.number_input(
-            "k-mer Length",
-            min_value=1, max_value=15, value=9, step=1
-        )
-        alleles = st.multiselect(
-            "HLA Allele(s)",
-            options=human_alleles,
-            default=[default]
-        )
+        ep_input = st.text_area("Peptide Sequence(s)", help="Comma-separated epitopes, e.g. SIINFEKL, AGSIINFEKL")
+        k_length = st.number_input("k-mer Length", min_value=1, max_value=15, value=9, step=1)
+        alleles = st.multiselect("HLA Allele(s)", options=human_alleles, default=[default])
         if st.button("Predict Binding"):
             if not ep_input.strip():
                 st.warning("Please enter at least one peptide sequence.")
@@ -303,14 +228,9 @@ def main():
                 st.dataframe(df, use_container_width=True, height=500)
 
     # Hide Streamlit footer/menu
-    hide_streamlit_style = """
-        <style>
-        #MainMenu {visibility: hidden;}
-        footer {visibility: hidden;}
-        </style>
-    """
-    st.markdown(hide_streamlit_style, unsafe_allow_html=True)
-
+    st.markdown("""
+        <style>#MainMenu{visibility:hidden;} footer{visibility:hidden;}</style>
+    """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
