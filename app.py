@@ -109,7 +109,7 @@ def verify_files():
         raise FileNotFoundError(f"Missing required files: {', '.join(missing)}")
 
 def verify_versions():
-    required = {'tensorflow': '2.19.0', 'h5py': '3.11.0'}  # Match your requirements.txt
+    required = {'tensorflow': '2.19.0', 'h5py': '3.13.0'}  # Match your requirements.txt
     
     current = {
         'tensorflow': tf.__version__,
