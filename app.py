@@ -15,11 +15,11 @@ from tensorflow.keras.utils import register_keras_serializable
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 import os
 
-# Configure environment
+# Environment Configuration
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TensorFlow logs
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # Disable GPU
 
-# ============== Updated Custom Components ==============
+# ============== Custom Components ==============
 @register_keras_serializable(package='CustomMetrics')
 class F1Score(tf.keras.metrics.Metric):
     def __init__(self, name='f1', threshold=0.5, **kwargs):
@@ -40,32 +40,15 @@ class F1Score(tf.keras.metrics.Metric):
     def get_config(self):
         return {'threshold': self.threshold}
 
-@register_keras_serializable(package='CustomOptimizers')
-class AdamW(tf.keras.optimizers.legacy.Adam):
-    def __init__(self, weight_decay=0.01, **kwargs):
-        super().__init__(**kwargs)
-        self.weight_decay = weight_decay
-
-    def _resource_apply_dense(self, grad, var, apply_state):
-        var_device, var_dtype = var.device, var.dtype.base_dtype
-        coefficients = ((apply_state or {}).get((var_device, var_dtype)) 
-                       or self._fallback_apply_state(var_device, var_dtype))
-        lr = coefficients['lr_t']
-        wd = tf.cast(self.weight_decay, var_dtype)
-        var.assign_sub(var * wd * lr)
-        return super()._resource_apply_dense(grad, var, apply_state)
-
-    def get_config(self):
-        config = super().get_config()
-        config.update({'weight_decay': self.weight_decay})
-        return config
-
 @register_keras_serializable(package='CustomLayers')
 class SafeAddLayer(Layer):
     def call(self, inputs):
         if isinstance(inputs, list):
             return tf.add(inputs[0], inputs[1])
         return tf.add(inputs, inputs)
+    
+    def get_config(self):
+        return super().get_config()
 
 @register_keras_serializable(package='CustomLayers')
 class Swish(Layer):
@@ -74,7 +57,6 @@ class Swish(Layer):
 
 @register_keras_serializable(package='CustomLayers')
 class RobustMultiHeadAttention(MultiHeadAttention):
-    """Handles MHA layers with extra shape parameters"""
     def __init__(self, **kwargs):
         base_args = inspect.getfullargspec(super().__init__).args
         valid_kwargs = {k: v for k, v in kwargs.items() if k in base_args}
@@ -86,94 +68,38 @@ class RobustMultiHeadAttention(MultiHeadAttention):
         config.update(self.extra_config)
         return config
 
-    @classmethod
-    def from_config(cls, config):
-        base_args = inspect.getfullargspec(super().__init__).args
-        valid_config = {k: v for k, v in config.items() if k in base_args}
-        return cls(**valid_config)
-
-@register_keras_serializable(package='CustomLayers')
-class UniversalLambda(Layer):
-    """Handles all lambda layer variants"""
-    def __init__(self, **kwargs):
-        self.function = kwargs.pop('function', None)
-        super().__init__(**kwargs)
-    
-    def call(self, inputs):
-        return inputs
-    
-    def get_config(self):
-        config = super().get_config()
-        config['function'] = self.function
-        return config
-
-@register_keras_serializable(package='CustomMetrics')
-class NegativePredictiveValue(tf.keras.metrics.Metric):
-    def __init__(self, name='npv', threshold=0.5, **kwargs):
-        super().__init__(name=name, **kwargs)
-        self.threshold = threshold
-        self.true_negatives = self.add_weight(name='tn', initializer='zeros')
-        self.false_negatives = self.add_weight(name='fn', initializer='zeros')
-
-    def update_state(self, y_true, y_pred, sample_weight=None):
-        y_pred = tf.cast(y_pred >= self.threshold, tf.float32)
-        y_true = tf.cast(y_true, tf.float32)
-        tn = tf.reduce_sum((1 - y_true) * (1 - y_pred))
-        fn = tf.reduce_sum(y_true * (1 - y_pred))
-        self.true_negatives.assign_add(tn)
-        self.false_negatives.assign_add(fn)
-
-    def result(self):
-        return self.true_negatives / (self.true_negatives + self.false_negatives + 1e-7)
-
-    def reset_state(self):
-        self.true_negatives.assign(0)
-        self.false_negatives.assign(0)
-
-    def get_config(self):
-        return {'threshold': self.threshold}
-
-# ============== Utility Functions ==============
+# ============== Core Functions ==============
 def verify_files():
     required_files = {
-        'model': 'best_combined_model.h5',
+        'model': 'converted_model',
         'tokenizer': 'tokenizer.pkl',
         'hla_db': 'class1_pseudosequences.csv'
     }
-    missing = [path for name, path in required_files.items() if not os.path.exists(path)]
+    missing = [path for path in required_files.values() if not os.path.exists(path)]
     if missing:
         raise FileNotFoundError(f"Missing required files: {', '.join(missing)}")
 
-def verify_versions():
-    required = {'tensorflow': '2.19.0', 'h5py': '3.13.0'}
-    current = {'tensorflow': tf.__version__, 'h5py': h5py.__version__}
-    for lib, ver in required.items():
-        if current[lib] != ver:
-            raise EnvironmentError(f"Version mismatch for {lib}: Required {ver}, Found {current[lib]}")
-
 @st.cache_resource
-@st.cache_resource
-def load_model_with_custom_objects():
+def load_model():
     custom_objects = {
         'F1Score': F1Score,
         'SafeAddLayer': SafeAddLayer,
         'Swish': Swish,
-        'MultiHeadAttention': MultiHeadAttention,
-        'Attention': Attention,
+        'RobustMultiHeadAttention': RobustMultiHeadAttention,
+        'MultiHeadAttention': RobustMultiHeadAttention,
         'tf.nn.silu': Swish(),
         'tf.__operators__.add': SafeAddLayer(),
+        'TFOpLambda': SafeAddLayer,
         'keras': tf.keras
     }
 
     try:
-        return tf.keras.models.load_model(
-            'best_combined_model.h5',
-            custom_objects=custom_objects
-        )
+        return tf.keras.models.load_model('converted_model', custom_objects=custom_objects)
     except Exception as e:
-        st.error(f"Model loading failed: {str(e)}")
+        st.error(f"""Model loading failed: {str(e)}
+                  Ensure you've converted the model using:
+                  model.save('converted_model', save_format='tf')""")
         st.stop()
-
 
 @st.cache_data
 def load_tokenizer():
@@ -186,6 +112,7 @@ def load_hla_database():
     non_human_pattern = r'^BoLA|^Mamu|^Patr|^SLA|^Chi|^DLA|^Eqca|^H-2|^Gogo|^H2'
     return hla_db[~hla_db[0].str.contains(non_human_pattern, case=False, regex=True)]
 
+# ============== Processing Functions ==============
 def generate_kmers(sequence, k=9):
     return [sequence[i:i+k] for i in range(len(sequence)-k+1)] if len(sequence) >= k else [sequence]
 
@@ -198,7 +125,7 @@ def predict_binding(epitope, hla_allele, model, tokenizer, hla_db, threshold=0.5
         hla_seq = hla_db.loc[hla_db[0] == hla_allele, 1].values[0]
         combined = f"{epitope}-{hla_seq}"
         proc = preprocess_sequence(combined, tokenizer)
-        prob = float(model.predict(proc, verbose=0)[0][0])
+        prob = float(model.predict(proc, verbose=0)[0][0]
         
         IC50_MIN = 0.1
         IC50_MAX = 50000.0
@@ -209,10 +136,7 @@ def predict_binding(epitope, hla_allele, model, tokenizer, hla_db, threshold=0.5
         else:
             ic50 = IC50_MAX + (IC50_CUTOFF - IC50_MAX) * ((threshold - prob)/threshold)
 
-        affinity = "High" if ic50 < 50 else \
-                 "Intermediate" if ic50 < 500 else \
-                 "Low" if ic50 < 5000 else \
-                 "Non-Binder"
+        affinity = "High" if ic50 < 50 else "Intermediate" if ic50 < 500 else "Low" if ic50 < 5000 else "Non-Binder"
 
         return {
             'epitope': epitope,
@@ -248,10 +172,8 @@ def main():
     st.title("Custommune HLA-I Epitope Binding Prediction")
     
     try:
-        tf.keras.config.enable_unsafe_deserialization = True
         verify_files()
-        verify_versions()
-        model = load_model_with_custom_objects()
+        model = load_model()
         tokenizer = load_tokenizer()
         hla_db = load_hla_database()
         
@@ -262,8 +184,8 @@ def main():
             st.header("Input Parameters")
             ep_input = st.text_area(
                 "Peptide Sequence(s)",
-                help="Enter comma-separated epitopes (e.g., SIINFEKL, AGSIINFEKL)",
-                placeholder="Enter peptide sequences here..."
+                placeholder="Enter comma-separated epitopes (e.g., SIINFEKL, AGSIINFEKL)",
+                height=150
             )
             
             k_length = st.slider(
@@ -290,17 +212,15 @@ def main():
                 help="Probability threshold for binding classification"
             )
             
-            run_analysis = st.button("Run Analysis", type="primary")
+            if st.button("Run Analysis", type="primary"):
+                if not ep_input.strip():
+                    st.error("Please enter at least one peptide sequence")
+                    st.stop()
+                if not selected_alleles:
+                    st.error("Please select at least one HLA allele")
+                    st.stop()
 
-        if run_analysis:
-            if not ep_input.strip():
-                st.error("Please enter at least one peptide sequence")
-                return
-                
-            if not selected_alleles:
-                st.error("Please select at least one HLA allele")
-                return
-                
+        if 'run_analysis' in locals():
             peptides = [e.strip() for e in ep_input.split(',') if e.strip()]
             results = []
             
