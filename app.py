@@ -15,11 +15,16 @@ from tensorflow.keras.utils import register_keras_serializable
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from tensorflow.keras.models import model_from_json
 from tensorflow.python.keras.layers.core import TFOpLambda
+import operator
+import tensorflow as tf
+from tensorflow.python.keras.layers.core import TFOpLambda
 
-# ─── Register internal ops and layers ─────────────────────────────────────────
-#tf.keras.utils.get_custom_objects()['TFOpLambda'] = TFOpLambda
+# Register all needed ops
+tf.keras.utils.get_custom_objects()['TFOpLambda'] = TFOpLambda
 tf.keras.utils.get_custom_objects()['tf.nn.silu'] = tf.nn.silu
 tf.keras.utils.get_custom_objects()['tf.__operators__.add'] = operator.add
+
+# Now load
 
 # ============== Unified Custom Components ==============
 @register_keras_serializable(package='CustomMetrics')
@@ -158,7 +163,12 @@ def load_model_and_data():
             # 3. Load model with architecture validation
             model = tf.keras.models.load_model(
                 'best_combined_model.h5',
-                compile=False
+                compile=False,
+                custom_objects={
+                'TFOpLambda': TFOpLambda,
+                'tf.nn.silu': tf.nn.silu,
+                'tf.__operators__.add': operator.add,]
+
             )
             
             # 4. Verify layer integrity
