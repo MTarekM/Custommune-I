@@ -41,11 +41,24 @@ class F1Score(tf.keras.metrics.Metric):
         return {'threshold': self.threshold}
 
 @register_keras_serializable(package='CustomLayers')
+
 class SafeAddLayer(Layer):
     def call(self, inputs):
         if isinstance(inputs, list):
             return tf.add(inputs[0], inputs[1])
         return tf.add(inputs, inputs)
+    
+    def get_config(self):
+        config = super().get_config()
+        # Add any custom config parameters here
+        return config
+
+    @classmethod
+    def from_config(cls, config):
+        # Filter out unexpected arguments before creating instance
+        expected_args = inspect.getfullargspec(cls.__init__).args
+        filtered_config = {k: v for k, v in config.items() if k in expected_args}
+        return cls(**filtered_config)
     
     def get_config(self):
         return super().get_config()
@@ -81,26 +94,25 @@ def verify_files():
 
 @st.cache_resource
 
+@st.cache_resource
 def load_model():
     custom_objects = {
         'CustomMetrics>F1Score': F1Score,
         'CustomLayers>SafeAddLayer': SafeAddLayer,
         'CustomLayers>Swish': Swish,
         'CustomLayers>RobustMultiHeadAttention': RobustMultiHeadAttention,
-        # If the model originally used MultiHeadAttention but was replaced, include:
-        'MultiHeadAttention': RobustMultiHeadAttention,
-        # Handle TensorFlow operation layers if necessary
+        # Handle TensorFlow add operation serialization
+        'tf.operators.add': SafeAddLayer,
         'TFOpLambda': SafeAddLayer,
         'keras': tf.keras
     }
 
     try:
-        return tf.keras.models.load_model('best_combined_model.h5', custom_objects=custom_objects)
+        return tf.keras.models.load_model('converted_model', custom_objects=custom_objects)
     except Exception as e:
         st.error(f"""Model loading failed: {str(e)}
-                  Ensure the model was saved with custom layers properly registered.""")
+                  Ensure the model contains only valid custom layers""")
         st.stop()
-
 @st.cache_data
 def load_tokenizer():
     with open('tokenizer.pkl', 'rb') as f:
