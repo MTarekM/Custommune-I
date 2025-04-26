@@ -160,7 +160,7 @@ def load_model_and_data():
 
     hla_db = pd.read_csv('class1_pseudosequences.csv', header=None)
     pattern = r'^BoLA|^Mamu|^Patr|^SLA|^Chi|^DLA|^Eqca|^H-2|^Gogo|^H2'
-    hla_db = hla_db[~hla_db[0].str.contains(pattern, case=False, regex=True)
+    hla_db = hla_db[~hla_db[0].str.contains(pattern, case=False, regex=True)]
 
     return model, tokenizer, hla_db
 
