@@ -155,15 +155,30 @@ def verify_versions():
 
 # ============== Load Model, Tokenizer, HLA DB ==============
 @st.cache_resource
-
 def load_model_and_data():
     verify_versions()
     verify_files()
-    
-    # Enhanced registration
-    register_tf_ops()
 
-    # Unified custom object registry
+    # Step 1: Extract model architecture as JSON
+    try:
+        with h5py.File('best_combined_model.h5', 'r') as f:
+            model_config = f.attrs.get('model_config')
+            if model_config is None:
+                # Try alternative location for config
+                model_config = f.attrs.get('model_config')
+            
+            if model_config is not None:
+                model_config = model_config.decode('utf-8')
+            else:
+                raise ValueError("Could not extract model config from H5 file")
+            
+            # Extract weights paths for later loading
+            weight_names = [n.decode('utf-8') for n in f['model_weights'].attrs['weight_names']]
+    except Exception as e:
+        st.error(f"Error extracting model architecture: {str(e)}")
+        st.stop()
+
+    # Step 2: Register all custom components
     custom_objects = {
         # Core components
         'Functional': tf.keras.Model,
@@ -178,43 +193,39 @@ def load_model_and_data():
         
         # TensorFlow operations
         'tf.nn.silu': tf.nn.silu,
-        'tf.__operators__.add': operator.add
+        'tf.__operators__.add': operator.add,
+        'tf.__operators__.mul': operator.mul,
+        'tf.__operators__.sub': operator.sub,
+        'tf.__operators__.truediv': operator.truediv,
+        'add': tf.add,
+        'multiply': tf.multiply,
+        'subtract': tf.subtract,
+        'divide': tf.divide,
+        'sigmoid': tf.sigmoid,
+        'tanh': tf.tanh,
+        'relu': tf.nn.relu,
+        'softmax': tf.nn.softmax,
     }
 
-    # Dual registration strategy
+    # Register all custom objects
     for name, obj in custom_objects.items():
         tf.keras.utils.get_custom_objects()[name] = obj
 
-    with tf.keras.utils.custom_object_scope(custom_objects):
-        try:
-            # Load model with scope-based custom objects
-            model = tf.keras.models.load_model(
-                'best_combined_model.h5',
-                compile=False  # Remove explicit custom_objects parameter
-            )
+    # Step 3: Try to reconstruct model from JSON
+    try:
+        with tf.keras.utils.custom_object_scope(custom_objects):
+            model = model_from_json(model_config)
             
-            # Layer verification
-            problematic_layers = [
-                layer for layer in model.layers 
-                if isinstance(layer, TFOpLambda) and 
-                layer.symbol not in tf.keras.utils.get_custom_objects()
-            ]
+            # Load weights directly from H5 file
+            model.load_weights('best_combined_model.h5')
             
-            if problematic_layers:
-                st.error(f"Unregistered lambda layers: {problematic_layers}")
-                st.stop()
-                
-        except Exception as e:
-            error_msg = f"""Model loading failed: {str(e)}
-            Verification Checklist:
-            1. Confirm model saved with model.save() in TF 2.12+
-            2. Validate all custom components are registered
-            3. Check TF version consistency (2.12.x)
-            4. Ensure custom class implementations match training"""
-            st.error(error_msg)
-            st.stop()
+            print("✅ Model successfully reconstructed from JSON and weights loaded")
+    except Exception as e:
+        st.error(f"Error reconstructing model: {str(e)}")
+        traceback.print_exc()
+        st.stop()
 
-    # Load supporting data
+    # Load supporting data (unchanged)
     with open('tokenizer.pkl', 'rb') as f:
         tokenizer = pickle.load(f)
 
