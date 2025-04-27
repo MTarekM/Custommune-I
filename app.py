@@ -24,7 +24,35 @@ tf.keras.utils.get_custom_objects()['TFOpLambda'] = TFOpLambda
 tf.keras.utils.get_custom_objects()['tf.nn.silu'] = tf.nn.silu
 tf.keras.utils.get_custom_objects()['tf.__operators__.add'] = operator.add
 
-# Now load
+def register_tf_ops():
+    # Register common TensorFlow operations used in Lambda layers
+    ops_to_register = {
+        'add': tf.add,
+        'multiply': tf.multiply,
+        'subtract': tf.subtract,
+        'divide': tf.divide,
+        'sigmoid': tf.sigmoid,
+        'tanh': tf.tanh,
+        'relu': tf.nn.relu,
+        'softmax': tf.nn.softmax,
+        'silu': tf.nn.silu,
+        'gelu': lambda x: x * tf.sigmoid(1.702 * x),  # Approximation of GELU
+    }
+    
+    # Register operators
+    ops_to_register.update({
+        'tf.__operators__.add': operator.add,
+        'tf.__operators__.mul': operator.mul,
+        'tf.__operators__.sub': operator.sub,
+        'tf.__operators__.truediv': operator.truediv,
+    })
+    
+    # Register all with both naming conventions
+    for name, func in ops_to_register.items():
+        tf.keras.utils.get_custom_objects()[name] = func
+        if '.' in name:
+            # Also register with full path as it might be serialized this way
+            tf.keras.utils.get_custom_objects()[name] = func
 
 # ============== Unified Custom Components ==============
 @register_keras_serializable(package='CustomMetrics')
@@ -127,11 +155,13 @@ def verify_versions():
 
 # ============== Load Model, Tokenizer, HLA DB ==============
 @st.cache_resource
-# ============== Load Model, Tokenizer, HLA DB ==============
-@st.cache_resource
+
 def load_model_and_data():
     verify_versions()
     verify_files()
+    
+    # Enhanced registration
+    register_tf_ops()
 
     # Unified custom object registry
     custom_objects = {
