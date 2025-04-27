@@ -1,7 +1,7 @@
-tqdm
 scikit-learn
 protobuf
 streamlit==1.31.0
-tensorflow==2.12.0
-h5py==3.7.0
+tensorflow>=2.16.0
+h5py
 pandas
+numpy
